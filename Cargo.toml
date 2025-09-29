@@ -1,0 +1,76 @@
+[package]
+name = "sortify-rs"
+version = "0.1.0"
+edition = "2021"
+authors = ["Sortify Team <sortify@example.com>"]
+description = "Image and video file organizer based on EXIF timestamps"
+license = "MIT"
+repository = "https://github.com/example/sortify.git"
+keywords = ["exif", "image", "video", "organizer", "metadata", "timestamp"]
+
+[lib]
+name = "sortify_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "test_kamadak_fields"
+path = "test_kamadak_fields.rs"
+
+[[bin]]
+name = "test_nom_exif_fields"
+path = "test_nom_exif_fields.rs"
+
+[[bin]]
+name = "debug_exif"
+path = "debug_exif.rs"
+
+[[bench]]
+name = "exif_performance_benchmark"
+harness = false
+
+[dependencies]
+# CLI and argument parsing
+clap = { version = "4.4", features = ["derive"] }
+
+# EXIF processing with nom-exif (async support)
+nom-exif = { version = "1", features = ["async"] }
+
+# EXIF processing with kamadak-exif
+exif = { package = "kamadak-exif", version = "0.6.1" }
+
+# File operations and directory traversal
+walkdir = "2.4"
+glob = "0.3"
+
+# Progress bars
+indicatif = "0.17"
+
+# Content hashing for duplicate detection
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+# Parallel processing
+rayon = "1.8"
+
+# Date/time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+log = "0.4"
+env_logger = "0.10"
+
+# Regex for timestamp parsing
+regex = "1.10"
+
+# Benchmarking dependencies
+serde = { version = "1.0", features = ["derive"] }
+num_cpus = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+futures = "0.3"
+
+[dev-dependencies]
+tempfile = "3.8"
+criterion = { version = "0.5", features = ["html_reports"] }
