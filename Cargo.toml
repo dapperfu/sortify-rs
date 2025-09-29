@@ -12,18 +12,6 @@ keywords = ["exif", "image", "video", "organizer", "metadata", "timestamp"]
 name = "sortify_rs"
 path = "src/lib.rs"
 
-[[bin]]
-name = "test_kamadak_fields"
-path = "test_kamadak_fields.rs"
-
-[[bin]]
-name = "test_nom_exif_fields"
-path = "test_nom_exif_fields.rs"
-
-[[bin]]
-name = "debug_exif"
-path = "debug_exif.rs"
-
 [[bench]]
 name = "exif_performance_benchmark"
 harness = false
@@ -32,10 +20,7 @@ harness = false
 # CLI and argument parsing
 clap = { version = "4.4", features = ["derive"] }
 
-# EXIF processing with nom-exif (async support)
-nom-exif = { version = "1", features = ["async"] }
-
-# EXIF processing with kamadak-exif
+# EXIF processing with kamadak-exif (complete EXIF support including subseconds)
 exif = { package = "kamadak-exif", version = "0.6.1" }
 
 # File operations and directory traversal

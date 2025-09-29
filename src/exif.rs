@@ -1,17 +1,14 @@
 /**
- * EXIF processing module with Rust-only implementation
+ * EXIF processing module with kamadak-exif implementation
  * 
- * Processing order (fastest to slowest):
- * 1. nom-exif (pure Rust, async support) - implemented
- * 2. kamadak-exif (pure Rust, good compatibility) - implemented
- * 3. File modification time (last resort) - implemented
+ * Uses kamadak-exif for complete EXIF support including subsecond timestamps
+ * which are essential for precise timestamp extraction with millisecond accuracy.
  */
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use exif::Reader as ExifReader;
 use log::{debug, warn};
-use nom_exif::parse_exif;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
@@ -31,12 +28,10 @@ impl ExifProcessor {
         Self
     }
 
-    /// Extract EXIF data from file using Rust-only methods with fallback
+    /// Extract EXIF data from file using kamadak-exif with fallback to file modification time
     /// 
-    /// Processing order (fastest to slowest):
-    /// 1. nom-exif (pure Rust, async support)
-    /// 2. kamadak-exif (pure Rust, good compatibility)
-    /// 3. File modification time (last resort)
+    /// kamadak-exif provides complete EXIF support including subsecond timestamps
+    /// which are essential for precise timestamp extraction with millisecond accuracy.
     pub fn extract_exif_data(&self, file_path: &Path) -> Result<ExifData> {
         debug!("Processing file: {}", file_path.display());
 
@@ -47,22 +42,10 @@ impl ExifProcessor {
 
         let is_video = matches!(file_ext.as_str(), "mov" | "mp4" | "avi" | "mkv" | "3gp" | "m4v");
 
-        // For video files, try Rust parsers first, then fall back to file mtime
+        // For video files, try kamadak-exif first, then fall back to file mtime
         if is_video {
-            debug!("Processing video file with Rust parsers: {}", file_path.display());
+            debug!("Processing video file with kamadak-exif: {}", file_path.display());
             
-            // Try nom-exif first for video files
-            match self.extract_exif_data_nom_exif_blocking(file_path) {
-                Ok(data) => {
-                    debug!("nom-exif succeeded for video: {}", file_path.display());
-                    return Ok(data);
-                }
-                Err(e) => {
-                    debug!("nom-exif failed for video {}: {}", file_path.display(), e);
-                }
-            }
-
-            // Try kamadak-exif for video files
             match self.extract_exif_data_kamadak(file_path) {
                 Ok(data) => {
                     debug!("kamadak-exif succeeded for video: {}", file_path.display());
@@ -78,19 +61,7 @@ impl ExifProcessor {
             return self.extract_file_mtime(file_path);
         }
 
-        // Method 1: Try nom-exif first (pure Rust, async support)
-        // For now, use blocking version in main method
-        match self.extract_exif_data_nom_exif_blocking(file_path) {
-            Ok(data) => {
-                debug!("nom-exif succeeded for: {}", file_path.display());
-                return Ok(data);
-            }
-            Err(e) => {
-                debug!("nom-exif failed for {}: {}", file_path.display(), e);
-            }
-        }
-
-        // Method 2: Try kamadak-exif (pure Rust, good compatibility)
+        // Try kamadak-exif for image files
         match self.extract_exif_data_kamadak(file_path) {
             Ok(data) => {
                 debug!("kamadak-exif succeeded for: {}", file_path.display());
@@ -101,79 +72,9 @@ impl ExifProcessor {
             }
         }
 
-        // Method 3: Use file modification time as last resort
+        // Use file modification time as last resort
         warn!("Using file modification time for: {}", file_path.display());
         self.extract_file_mtime(file_path)
-    }
-
-    /// Extract EXIF data using nom-exif (pure Rust, async support)
-    pub async fn extract_exif_data_nom_exif(&self, file_path: &Path) -> Result<ExifData> {
-        debug!("Using nom-exif (async) for: {}", file_path.display());
-        
-        let file = File::open(file_path)
-            .context("Failed to open file for nom-exif")?;
-        
-        let iter = parse_exif(file, None)
-            .context("Failed to parse EXIF data with nom-exif")?
-            .ok_or_else(|| anyhow::anyhow!("No EXIF data found"))?;
-
-        let mut metadata = HashMap::new();
-        
-        // Extract all EXIF fields
-        for entry in iter.clone() {
-            if let Some(tag) = entry.tag() {
-                let tag_name = format!("{:?}", tag);
-                let value = match entry.take_result() {
-                    Ok(result) => result.to_string(),
-                    Err(_) => "Error".to_string(),
-                };
-                metadata.insert(tag_name, value);
-            }
-        }
-
-        // Extract best timestamp
-        let (timestamp, milliseconds) = self.extract_best_timestamp(&metadata)?;
-
-        Ok(ExifData {
-            timestamp,
-            milliseconds,
-            metadata,
-        })
-    }
-
-    /// Extract EXIF data using nom-exif (blocking version for benchmarks)
-    pub fn extract_exif_data_nom_exif_blocking(&self, file_path: &Path) -> Result<ExifData> {
-        debug!("Using nom-exif (blocking) for: {}", file_path.display());
-        
-        let file = File::open(file_path)
-            .context("Failed to open file for nom-exif")?;
-        
-        let iter = parse_exif(file, None)
-            .context("Failed to parse EXIF data with nom-exif")?
-            .ok_or_else(|| anyhow::anyhow!("No EXIF data found"))?;
-
-        let mut metadata = HashMap::new();
-        
-        // Extract all EXIF fields
-        for entry in iter.clone() {
-            if let Some(tag) = entry.tag() {
-                let tag_name = format!("{:?}", tag);
-                let value = match entry.take_result() {
-                    Ok(result) => result.to_string(),
-                    Err(_) => "Error".to_string(),
-                };
-                metadata.insert(tag_name, value);
-            }
-        }
-
-        // Extract best timestamp
-        let (timestamp, milliseconds) = self.extract_best_timestamp(&metadata)?;
-
-        Ok(ExifData {
-            timestamp,
-            milliseconds,
-            metadata,
-        })
     }
 
     pub fn extract_exif_data_kamadak(&self, file_path: &Path) -> Result<ExifData> {
@@ -348,40 +249,9 @@ impl ExifProcessor {
     fn parse_timestamp_with_subseconds(&self, timestamp_str: &str) -> Result<(DateTime<Utc>, u16)> {
         let timestamp_str = timestamp_str.trim();
         
-        // Handle different timestamp formats
-        let (main_part, subsec_part) = if timestamp_str.contains('T') {
-            // ISO format: 2025-09-24T08:20:49-04:00 or 2025-09-24T08:20:49
-            let parts: Vec<&str> = timestamp_str.split('T').collect();
-            if parts.len() != 2 {
-                anyhow::bail!("Invalid ISO timestamp format: {}", timestamp_str);
-            }
-            let date_part = parts[0];
-            let time_part = parts[1];
-            
-            // Remove timezone info from time part
-            let time_part = if time_part.len() > 6 {
-                let last_6 = &time_part[time_part.len()-6..];
-                if last_6.starts_with('+') || last_6.starts_with('-') {
-                    &time_part[..time_part.len()-6]
-                } else {
-                    time_part
-                }
-            } else {
-                time_part
-            };
-            
-            let combined = format!("{} {}", date_part, time_part);
-            if combined.contains('.') {
-                let subsec_parts: Vec<&str> = combined.split('.').collect();
-                if subsec_parts.len() != 2 {
-                    anyhow::bail!("Invalid timestamp format: {}", timestamp_str);
-                }
-                (subsec_parts[0].to_string(), subsec_parts[1].to_string())
-            } else {
-                (combined, "0".to_string())
-            }
-        } else if timestamp_str.contains('.') {
-            // Standard EXIF format: 2025:09:24 08:20:49.680
+        // Handle EXIF format timestamps from kamadak-exif
+        let (main_part, subsec_part) = if timestamp_str.contains('.') {
+            // Standard EXIF format: 2025:09:24 08:20:49.680 or 2025-09-24 08:20:49.680
             let parts: Vec<&str> = timestamp_str.split('.').collect();
             if parts.len() != 2 {
                 anyhow::bail!("Invalid timestamp format: {}", timestamp_str);
@@ -394,7 +264,7 @@ impl ExifProcessor {
 
         // Parse the main datetime part - try different formats
         let naive_dt = if main_part.contains('-') {
-            // ISO date format: 2025-09-24 08:20:49
+            // ISO format: 2025-09-24 08:20:49
             NaiveDateTime::parse_from_str(&main_part, "%Y-%m-%d %H:%M:%S")
                 .context("Failed to parse ISO timestamp")?
         } else {
@@ -409,6 +279,8 @@ impl ExifProcessor {
         } else {
             &subsec_part
         };
+        // Remove quotes if present
+        let subsec_str = subsec_str.trim_matches('"');
         let padded_subsec = format!("{:0<3}", subsec_str);
         let milliseconds: u16 = padded_subsec.parse()
             .context("Failed to parse subseconds")?;
