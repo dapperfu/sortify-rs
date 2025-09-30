@@ -7,7 +7,7 @@ use sortify_rs::exif::{ExifProcessor, ExifData};
 
 /// Load real image files from the test directory
 fn load_real_test_images() -> Vec<std::path::PathBuf> {
-    let test_dir = "/keg/pictures/incoming/2025.old/09-Sep";
+    let test_dir = "/projects/sortify-rs/2025/09-Sep";
     let mut test_files = Vec::new();
     
     println!("Loading real image files from: {}", test_dir);
@@ -36,13 +36,13 @@ fn load_real_test_images() -> Vec<std::path::PathBuf> {
     test_files
 }
 
-/// Benchmark nom-exif with async processing (simplified to blocking for now)
-fn benchmark_nom_exif_async(files: &[std::path::PathBuf]) -> Vec<Result<ExifData, anyhow::Error>> {
+/// Benchmark fast-exif-rs with parallel processing
+fn benchmark_fast_exif_parallel(files: &[std::path::PathBuf]) -> Vec<Result<ExifData, anyhow::Error>> {
     let processor = ExifProcessor::new();
     
     // Process files concurrently using rayon
     files.par_iter().map(|file| {
-        processor.extract_exif_data_nom_exif_blocking(file)
+        processor.extract_exif_data_fast_exif(file)
     }).collect()
 }
 
@@ -57,13 +57,12 @@ fn benchmark_kamadak_exif_parallel(files: &[std::path::PathBuf]) -> Vec<Result<E
 }
 
 
-/// Benchmark nom-exif with sequential processing
-fn benchmark_nom_exif_sequential(files: &[std::path::PathBuf]) -> Vec<Result<ExifData, anyhow::Error>> {
+/// Benchmark fast-exif-rs with sequential processing
+fn benchmark_fast_exif_sequential(files: &[std::path::PathBuf]) -> Vec<Result<ExifData, anyhow::Error>> {
     let processor = ExifProcessor::new();
     
     files.iter().map(|file| {
-        // Use blocking version for sequential processing
-        processor.extract_exif_data_nom_exif_blocking(file)
+        processor.extract_exif_data_fast_exif(file)
     }).collect()
 }
 
@@ -89,24 +88,24 @@ fn benchmark_exif_libraries(c: &mut Criterion) {
         }
         let files = &test_files[..*file_count];
         
-        // Benchmark nom-exif parallel
+        // Benchmark fast-exif-rs parallel
         group.bench_with_input(
-            BenchmarkId::new("nom-exif-parallel", file_count),
+            BenchmarkId::new("fast-exif-parallel", file_count),
             file_count,
             |b, _| {
                 b.iter(|| {
-                    benchmark_nom_exif_async(black_box(files))
+                    benchmark_fast_exif_parallel(black_box(files))
                 })
             },
         );
         
-        // Benchmark nom-exif sequential
+        // Benchmark fast-exif-rs sequential
         group.bench_with_input(
-            BenchmarkId::new("nom-exif-sequential", file_count),
+            BenchmarkId::new("fast-exif-sequential", file_count),
             file_count,
             |b, _| {
                 b.iter(|| {
-                    benchmark_nom_exif_sequential(black_box(files))
+                    benchmark_fast_exif_sequential(black_box(files))
                 })
             },
         );
@@ -146,9 +145,9 @@ fn benchmark_throughput(c: &mut Criterion) {
     group.throughput(criterion::Throughput::Elements(test_files.len() as u64));
     
     // Test throughput with all files
-    group.bench_function("nom-exif-parallel-throughput", |b| {
+    group.bench_function("fast-exif-parallel-throughput", |b| {
         b.iter(|| {
-            benchmark_nom_exif_async(black_box(&test_files))
+            benchmark_fast_exif_parallel(black_box(&test_files))
         })
     });
     
@@ -179,9 +178,9 @@ fn benchmark_error_handling(c: &mut Criterion) {
     
     let mut group = c.benchmark_group("EXIF Error Handling");
     
-    group.bench_function("nom-exif-error-handling", |b| {
+    group.bench_function("fast-exif-error-handling", |b| {
         b.iter(|| {
-            benchmark_nom_exif_async(black_box(&test_files))
+            benchmark_fast_exif_parallel(black_box(&test_files))
         })
     });
     
