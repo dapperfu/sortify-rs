@@ -17,8 +17,8 @@ name = "exif_performance_benchmark"
 harness = false
 
 [[bin]]
-name = "test_exif_writer"
-path = "test_exif_writer.rs"
+name = "test_complete_exif_writer"
+path = "test_complete_exif_writer.rs"
 
 
 [dependencies]

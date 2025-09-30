@@ -239,14 +239,24 @@ impl ExifWriter {
     pub fn write_to_jpeg(&self, file_path: &Path) -> Result<()> {
         debug!("Writing EXIF data to JPEG file: {}", file_path.display());
         
-        // TODO: Implement JPEG EXIF writing
-        // This requires:
-        // 1. Reading the JPEG file structure
-        // 2. Locating/creating the APP1 segment
-        // 3. Writing the EXIF data in the correct binary format
-        // 4. Preserving the JPEG image data
+        // Read the JPEG file
+        let mut file_data = std::fs::read(file_path)
+            .context("Failed to read JPEG file")?;
         
-        warn!("JPEG EXIF writing not yet implemented");
+        // Generate EXIF data
+        let exif_data = self.to_bytes()?;
+        
+        // Create APP1 segment with EXIF data
+        let app1_segment = self.create_app1_segment(&exif_data)?;
+        
+        // Insert or replace APP1 segment in JPEG
+        self.insert_app1_segment(&mut file_data, &app1_segment)?;
+        
+        // Write back to file
+        std::fs::write(file_path, &file_data)
+            .context("Failed to write JPEG file")?;
+        
+        debug!("Successfully wrote EXIF data to JPEG file");
         Ok(())
     }
 
@@ -254,13 +264,14 @@ impl ExifWriter {
     pub fn write_to_tiff(&self, file_path: &Path) -> Result<()> {
         debug!("Writing EXIF data to TIFF file: {}", file_path.display());
         
-        // TODO: Implement TIFF EXIF writing
-        // This requires:
-        // 1. Creating TIFF header with correct endianness
-        // 2. Writing IFD structures
-        // 3. Handling tag data and offsets
+        // Generate complete TIFF file with EXIF data
+        let tiff_data = self.to_bytes()?;
         
-        warn!("TIFF EXIF writing not yet implemented");
+        // Write TIFF data to file
+        std::fs::write(file_path, &tiff_data)
+            .context("Failed to write TIFF file")?;
+        
+        debug!("Successfully wrote EXIF data to TIFF file");
         Ok(())
     }
 
@@ -277,6 +288,101 @@ impl ExifWriter {
         // TODO: Write EXIF IFD and thumbnail IFD if present
         
         Ok(data)
+    }
+
+    /// Create APP1 segment for JPEG with EXIF data
+    fn create_app1_segment(&self, exif_data: &[u8]) -> Result<Vec<u8>> {
+        let mut segment = Vec::new();
+        
+        // APP1 marker (0xFFE1)
+        segment.push(0xFF);
+        segment.push(0xE1);
+        
+        // Calculate segment length (2 bytes for length + 6 bytes for "Exif\0\0" + EXIF data)
+        let segment_length = 2 + 6 + exif_data.len();
+        if segment_length > 65535 {
+            anyhow::bail!("EXIF data too large for JPEG APP1 segment");
+        }
+        
+        // Write segment length (big-endian)
+        segment.push((segment_length >> 8) as u8);
+        segment.push(segment_length as u8);
+        
+        // Write "Exif\0\0" identifier
+        segment.extend_from_slice(b"Exif\0\0");
+        
+        // Write EXIF data
+        segment.extend_from_slice(exif_data);
+        
+        Ok(segment)
+    }
+
+    /// Insert or replace APP1 segment in JPEG data
+    fn insert_app1_segment(&self, jpeg_data: &mut Vec<u8>, app1_segment: &[u8]) -> Result<()> {
+        // Find existing APP1 segment and replace it, or insert after SOI marker
+        let mut insert_pos = None;
+        let mut remove_start = None;
+        let mut remove_end = None;
+        
+        let mut i = 0;
+        while i < jpeg_data.len() - 1 {
+            if jpeg_data[i] == 0xFF {
+                match jpeg_data[i + 1] {
+                    0xD8 => { // SOI marker
+                        insert_pos = Some(i + 2);
+                        i += 2;
+                        continue;
+                    }
+                    0xE1 => { // APP1 marker
+                        // Found existing APP1 segment, mark for removal
+                        if i + 3 < jpeg_data.len() {
+                            let length = ((jpeg_data[i + 2] as u16) << 8) | (jpeg_data[i + 3] as u16);
+                            remove_start = Some(i);
+                            remove_end = Some(i + 2 + length as usize);
+                            i += 2 + length as usize;
+                            continue;
+                        }
+                    }
+                    0xD9 => { // EOI marker - end of image
+                        break;
+                    }
+                    _ => {
+                        // Other marker, skip it
+                        if i + 3 < jpeg_data.len() {
+                            let length = ((jpeg_data[i + 2] as u16) << 8) | (jpeg_data[i + 3] as u16);
+                            i += 2 + length as usize;
+                            continue;
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+        
+        // Remove existing APP1 segment if found
+        if let (Some(start), Some(end)) = (remove_start, remove_end) {
+            jpeg_data.drain(start..end);
+        }
+        
+        // Insert new APP1 segment
+        if let Some(pos) = insert_pos {
+            // Adjust position if we removed a segment
+            let adjusted_pos = if let Some(remove_start) = remove_start {
+                if pos > remove_start {
+                    pos - (remove_end.unwrap() - remove_start)
+                } else {
+                    pos
+                }
+            } else {
+                pos
+            };
+            
+            jpeg_data.splice(adjusted_pos..adjusted_pos, app1_segment.iter().cloned());
+        } else {
+            anyhow::bail!("Invalid JPEG file: SOI marker not found");
+        }
+        
+        Ok(())
     }
 
     /// Write TIFF header (8 bytes)

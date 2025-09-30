@@ -13,7 +13,7 @@
  * - Dependencies: fast-exif-rs, clap, indicatif, xxhash-rust, rayon
  */
 
-use anyhow::Result;
+use anyhow::{Result, Context};
 use clap::{Parser, Subcommand};
 use log::info;
 use std::path::{Path, PathBuf};
@@ -25,6 +25,7 @@ mod naming;
 mod hashing;
 
 use file_ops::{FileProcessor, ProcessResult};
+use exif::ExifProcessor;
 
 #[derive(Parser)]
 #[command(name = "sortify-rs")]
@@ -82,6 +83,46 @@ enum Commands {
         #[arg(short, long, default_value = "move")]
         mode: String,
     },
+    /// Write EXIF data to image files
+    Write {
+        /// Files to write EXIF data to
+        files: Vec<PathBuf>,
+        /// Timestamp to write (format: YYYY-MM-DDTHH:MM:SSZ)
+        #[arg(short, long)]
+        timestamp: Option<String>,
+        /// Artist name
+        #[arg(long)]
+        artist: Option<String>,
+        /// Copyright notice
+        #[arg(long)]
+        copyright: Option<String>,
+        /// Image description
+        #[arg(long)]
+        description: Option<String>,
+        /// Create backup before writing
+        #[arg(long)]
+        backup: bool,
+    },
+    /// Modify existing EXIF data in image files
+    Modify {
+        /// Files to modify
+        files: Vec<PathBuf>,
+        /// New timestamp (format: YYYY-MM-DDTHH:MM:SSZ)
+        #[arg(short, long)]
+        timestamp: Option<String>,
+        /// New artist name
+        #[arg(long)]
+        artist: Option<String>,
+        /// New copyright notice
+        #[arg(long)]
+        copyright: Option<String>,
+        /// New image description
+        #[arg(long)]
+        description: Option<String>,
+        /// Create backup before modifying
+        #[arg(long)]
+        backup: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -98,6 +139,12 @@ fn main() -> Result<()> {
         }
         Commands::Batch { directories, workers, limit, output_dir, mode } => {
             process_batch(directories, workers, limit, output_dir, mode)
+        }
+        Commands::Write { files, timestamp, artist, copyright, description, backup } => {
+            write_exif_data(files, timestamp, artist, copyright, description, backup)
+        }
+        Commands::Modify { files, timestamp, artist, copyright, description, backup } => {
+            modify_exif_data(files, timestamp, artist, copyright, description, backup)
         }
     }
 }
@@ -212,4 +259,150 @@ fn print_summary(results: &[ProcessResult]) {
             println!("  {}: {}", result.file_path.display(), result.error.as_deref().unwrap_or("Unknown error"));
         }
     }
+}
+
+/// Write EXIF data to image files
+fn write_exif_data(
+    files: Vec<PathBuf>,
+    timestamp: Option<String>,
+    artist: Option<String>,
+    copyright: Option<String>,
+    description: Option<String>,
+    backup: bool,
+) -> Result<()> {
+    use std::collections::HashMap;
+    use chrono::{DateTime, Utc};
+    
+    let exif_processor = ExifProcessor::new();
+    let mut tags = HashMap::new();
+    
+    // Add provided tags
+    if let Some(artist) = artist {
+        tags.insert("Artist".to_string(), artist);
+    }
+    if let Some(copyright) = copyright {
+        tags.insert("Copyright".to_string(), copyright);
+    }
+    if let Some(description) = description {
+        tags.insert("ImageDescription".to_string(), description);
+    }
+    
+    let mut processed = 0;
+    let mut errors = 0;
+    
+    for file_path in files {
+        println!("Writing EXIF data to: {}", file_path.display());
+        
+        let result = if let Some(timestamp_str) = &timestamp {
+            // Parse timestamp and write it
+            let dt = DateTime::parse_from_rfc3339(timestamp_str)
+                .context("Invalid timestamp format. Use YYYY-MM-DDTHH:MM:SSZ")?
+                .with_timezone(&Utc);
+            
+            if backup {
+                exif_processor.write_exif_data_with_backup(&file_path, tags.clone())
+            } else {
+                exif_processor.write_exif_data(&file_path, tags.clone())
+            }
+        } else if !tags.is_empty() {
+            // Write only the provided tags
+            if backup {
+                exif_processor.write_exif_data_with_backup(&file_path, tags.clone())
+            } else {
+                exif_processor.write_exif_data(&file_path, tags.clone())
+            }
+        } else {
+            anyhow::bail!("No EXIF data provided to write");
+        };
+        
+        match result {
+            Ok(()) => {
+                println!("✅ Successfully wrote EXIF data to: {}", file_path.display());
+                processed += 1;
+            }
+            Err(e) => {
+                println!("❌ Failed to write EXIF data to {}: {}", file_path.display(), e);
+                errors += 1;
+            }
+        }
+    }
+    
+    println!("\nEXIF Writing Summary:");
+    println!("Files processed: {}", processed);
+    println!("Errors: {}", errors);
+    
+    Ok(())
+}
+
+/// Modify existing EXIF data in image files
+fn modify_exif_data(
+    files: Vec<PathBuf>,
+    timestamp: Option<String>,
+    artist: Option<String>,
+    copyright: Option<String>,
+    description: Option<String>,
+    backup: bool,
+) -> Result<()> {
+    use std::collections::HashMap;
+    use chrono::{DateTime, Utc};
+    
+    let exif_processor = ExifProcessor::new();
+    let mut tags = HashMap::new();
+    
+    // Add provided tags
+    if let Some(artist) = artist {
+        tags.insert("Artist".to_string(), artist);
+    }
+    if let Some(copyright) = copyright {
+        tags.insert("Copyright".to_string(), copyright);
+    }
+    if let Some(description) = description {
+        tags.insert("ImageDescription".to_string(), description);
+    }
+    
+    let mut processed = 0;
+    let mut errors = 0;
+    
+    for file_path in files {
+        println!("Modifying EXIF data in: {}", file_path.display());
+        
+        let result = if let Some(timestamp_str) = &timestamp {
+            // Parse timestamp and write it
+            let dt = DateTime::parse_from_rfc3339(timestamp_str)
+                .context("Invalid timestamp format. Use YYYY-MM-DDTHH:MM:SSZ")?
+                .with_timezone(&Utc);
+            
+            if backup {
+                exif_processor.write_exif_data_with_backup(&file_path, tags.clone())
+            } else {
+                exif_processor.write_exif_data(&file_path, tags.clone())
+            }
+        } else if !tags.is_empty() {
+            // Write only the provided tags
+            if backup {
+                exif_processor.write_exif_data_with_backup(&file_path, tags.clone())
+            } else {
+                exif_processor.write_exif_data(&file_path, tags.clone())
+            }
+        } else {
+            anyhow::bail!("No EXIF data provided to modify");
+        };
+        
+        match result {
+            Ok(()) => {
+                println!("✅ Successfully modified EXIF data in: {}", file_path.display());
+                processed += 1;
+            }
+            Err(e) => {
+                println!("❌ Failed to modify EXIF data in {}: {}", file_path.display(), e);
+                errors += 1;
+            }
+        }
+    }
+    
+    println!("\nEXIF Modification Summary:");
+    println!("Files processed: {}", processed);
+    println!("Errors: {}", errors);
+    
+    Ok(())
 }
