@@ -91,12 +91,12 @@ impl FileProcessor {
         );
         pb.set_message("Analyzing files");
 
-        // Use rayon for parallel processing with collect to avoid mutex contention
+        // Use parallel processing with rayon for maximum performance
         let pb = Arc::new(pb);
         let results: Vec<AnalysisResult> = files
-            .par_iter()
+            .into_par_iter()
             .map(|file_path| {
-                let result = self.analyze_single_file(file_path);
+                let result = self.analyze_single_file(&file_path);
                 pb.inc(1);
                 result
             })

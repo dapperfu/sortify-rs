@@ -6,9 +6,9 @@ use std::collections::HashMap;
 use exif::Reader as ExifReader;
 
 fn main() -> Result<()> {
-    let test_file = Path::new("/keg/pictures/incoming/2025.old/09-Sep/20250928_151944.600.jpg");
+    let test_file = Path::new("/projects/sortify/sortify-rs/2025/09-Sep/20250924_082049.680.jpg");
     
-    println!("Testing kamadak-exif field extraction on: {}", test_file.display());
+    println!("Testing kamadak-exif on: {}", test_file.display());
     
     let file = File::open(test_file)?;
     let mut bufreader = BufReader::new(&file);
@@ -23,21 +23,18 @@ fn main() -> Result<()> {
                 metadata.insert(tag_name, value);
             }
             
-            println!("\nAll timestamp-related fields found by kamadak-exif:");
-            for (key, value) in &metadata {
-                if key.to_lowercase().contains("time") || 
-                   key.to_lowercase().contains("date") ||
-                   key.to_lowercase().contains("gps") ||
-                   key.to_lowercase().contains("subsec") {
-                    println!("  {}: {}", key, value);
+            println!("Found {} EXIF fields", metadata.len());
+            
+            // Check for timestamp fields
+            let timestamp_fields = ["DateTimeOriginal", "ModifyDate", "CreateDate", "DateTimeDigitized", "SubSecTimeOriginal", "SubSecTime", "SubSecTimeDigitized"];
+            for field in timestamp_fields {
+                if let Some(value) = metadata.get(field) {
+                    println!("  {}: {}", field, value);
                 }
             }
-            
-            println!("\nTotal fields found: {}", metadata.len());
         }
         Err(e) => println!("kamadak-exif parsing failed: {}", e),
     }
     
     Ok(())
 }
-

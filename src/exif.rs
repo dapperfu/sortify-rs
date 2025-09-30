@@ -1,13 +1,16 @@
 /**
- * EXIF processing module with kamadak-exif implementation
+ * EXIF processing module with fast-exif-rs implementation
  * 
- * Uses kamadak-exif for complete EXIF support including subsecond timestamps
- * which are essential for precise timestamp extraction with millisecond accuracy.
+ * Processing order (fastest to slowest):
+ * 1. fast-exif-rs (ultra-fast pure Rust, 55.6x faster than standard libraries)
+ * 2. kamadak-exif (pure Rust, good compatibility) 
+ * 3. File modification time (last resort)
  */
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use exif::Reader as ExifReader;
+use fast_exif_reader::{FastExifReader, UltraFastJpegReader, HybridExifReader, ExifError};
 use log::{debug, warn};
 use std::collections::HashMap;
 use std::fs::File;
@@ -28,10 +31,14 @@ impl ExifProcessor {
         Self
     }
 
-    /// Extract EXIF data from file using kamadak-exif with fallback to file modification time
+    /// Extract EXIF data from file using fast-exif-rs with comprehensive fallback strategy
     /// 
-    /// kamadak-exif provides complete EXIF support including subsecond timestamps
-    /// which are essential for precise timestamp extraction with millisecond accuracy.
+    /// Processing order (fastest to slowest):
+    /// 1. Ultra-fast JPEG reader (for JPEG files only, zero-copy optimization)
+    /// 2. fast-exif-rs (ultra-fast pure Rust, works for all formats)
+    /// 3. Hybrid reader (balanced performance and compatibility)
+    /// 4. kamadak-exif (pure Rust, good compatibility) 
+    /// 5. File modification time (last resort)
     pub fn extract_exif_data(&self, file_path: &Path) -> Result<ExifData> {
         debug!("Processing file: {}", file_path.display());
 
@@ -41,27 +48,44 @@ impl ExifProcessor {
             .unwrap_or_default();
 
         let is_video = matches!(file_ext.as_str(), "mov" | "mp4" | "avi" | "mkv" | "3gp" | "m4v");
+        let is_jpeg = matches!(file_ext.as_str(), "jpg" | "jpeg");
 
-        // For video files, try kamadak-exif first, then fall back to file mtime
-        if is_video {
-            debug!("Processing video file with kamadak-exif: {}", file_path.display());
-            
-            match self.extract_exif_data_kamadak(file_path) {
+        // Method 1: For JPEG files, try ultra-fast JPEG reader first (specialized zero-copy optimization)
+        if is_jpeg {
+            match self.extract_exif_data_ultra_fast_jpeg(file_path) {
                 Ok(data) => {
-                    debug!("kamadak-exif succeeded for video: {}", file_path.display());
+                    debug!("ultra-fast JPEG reader succeeded for: {}", file_path.display());
                     return Ok(data);
                 }
                 Err(e) => {
-                    debug!("kamadak-exif failed for video {}: {}", file_path.display(), e);
+                    debug!("ultra-fast JPEG reader failed for {}: {}", file_path.display(), e);
                 }
             }
-
-            // For video files, fall back to file modification time
-            warn!("Using file modification time for video: {}", file_path.display());
-            return self.extract_file_mtime(file_path);
         }
 
-        // Try kamadak-exif for image files
+        // Method 2: Try fast-exif-rs (ultra-fast pure Rust, works for all formats)
+        match self.extract_exif_data_fast_exif(file_path) {
+            Ok(data) => {
+                debug!("fast-exif-rs succeeded for: {}", file_path.display());
+                return Ok(data);
+            }
+            Err(e) => {
+                debug!("fast-exif-rs failed for {}: {}", file_path.display(), e);
+            }
+        }
+
+        // Method 3: Try hybrid reader for better compatibility
+        match self.extract_exif_data_hybrid(file_path) {
+            Ok(data) => {
+                debug!("hybrid reader succeeded for: {}", file_path.display());
+                return Ok(data);
+            }
+            Err(e) => {
+                debug!("hybrid reader failed for {}: {}", file_path.display(), e);
+            }
+        }
+
+        // Method 4: Try kamadak-exif (pure Rust, good compatibility)
         match self.extract_exif_data_kamadak(file_path) {
             Ok(data) => {
                 debug!("kamadak-exif succeeded for: {}", file_path.display());
@@ -72,9 +96,66 @@ impl ExifProcessor {
             }
         }
 
-        // Use file modification time as last resort
+        // Method 5: Use file modification time as last resort
         warn!("Using file modification time for: {}", file_path.display());
         self.extract_file_mtime(file_path)
+    }
+
+    /// Extract EXIF data using fast-exif-rs (ultra-fast pure Rust implementation)
+    pub fn extract_exif_data_fast_exif(&self, file_path: &Path) -> Result<ExifData> {
+        debug!("Using fast-exif-rs for: {}", file_path.display());
+        
+        let mut fast_reader = FastExifReader::new();
+        let file_path_str = file_path.to_string_lossy().to_string();
+        let metadata = fast_reader.read_file(&file_path_str)
+            .map_err(|e| anyhow::anyhow!("fast-exif-rs failed: {}", e))?;
+
+        // Extract best timestamp
+        let (timestamp, milliseconds) = self.extract_best_timestamp(&metadata)?;
+
+        Ok(ExifData {
+            timestamp,
+            milliseconds,
+            metadata,
+        })
+    }
+
+    /// Extract EXIF data using ultra-fast JPEG reader (specialized for JPEG files)
+    pub fn extract_exif_data_ultra_fast_jpeg(&self, file_path: &Path) -> Result<ExifData> {
+        debug!("Using ultra-fast JPEG reader for: {}", file_path.display());
+        
+        let mut ultra_reader = UltraFastJpegReader::new();
+        let file_path_str = file_path.to_string_lossy().to_string();
+        let metadata = ultra_reader.read_file(&file_path_str)
+            .map_err(|e| anyhow::anyhow!("ultra-fast JPEG reader failed: {}", e))?;
+
+        // Extract best timestamp
+        let (timestamp, milliseconds) = self.extract_best_timestamp(&metadata)?;
+
+        Ok(ExifData {
+            timestamp,
+            milliseconds,
+            metadata,
+        })
+    }
+
+    /// Extract EXIF data using hybrid reader (balanced performance and compatibility)
+    pub fn extract_exif_data_hybrid(&self, file_path: &Path) -> Result<ExifData> {
+        debug!("Using hybrid reader for: {}", file_path.display());
+        
+        let mut hybrid_reader = HybridExifReader::new();
+        let file_path_str = file_path.to_string_lossy().to_string();
+        let metadata = hybrid_reader.read_file(&file_path_str)
+            .map_err(|e| anyhow::anyhow!("hybrid reader failed: {}", e))?;
+
+        // Extract best timestamp
+        let (timestamp, milliseconds) = self.extract_best_timestamp(&metadata)?;
+
+        Ok(ExifData {
+            timestamp,
+            milliseconds,
+            metadata,
+        })
     }
 
     pub fn extract_exif_data_kamadak(&self, file_path: &Path) -> Result<ExifData> {
