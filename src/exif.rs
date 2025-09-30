@@ -8,10 +8,10 @@
  */
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc, Datelike};
 use exif::Reader as ExifReader;
-use fast_exif_reader::{FastExifReader, UltraFastJpegReader, HybridExifReader, ExifError};
-use log::{debug, warn};
+use fast_exif_reader::{FastExifReader, UltraFastJpegReader, HybridExifReader};
+use log::debug;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
@@ -38,7 +38,9 @@ impl ExifProcessor {
     /// 2. fast-exif-rs (ultra-fast pure Rust, works for all formats)
     /// 3. Hybrid reader (balanced performance and compatibility)
     /// 4. kamadak-exif (pure Rust, good compatibility) 
-    /// 5. File modification time (last resort)
+    /// 
+    /// Note: File modification time fallback has been removed as it's unreliable.
+    /// Files without valid EXIF timestamps will be ignored.
     pub fn extract_exif_data(&self, file_path: &Path) -> Result<ExifData> {
         debug!("Processing file: {}", file_path.display());
 
@@ -47,7 +49,6 @@ impl ExifProcessor {
             .map(|s| s.to_lowercase())
             .unwrap_or_default();
 
-        let is_video = matches!(file_ext.as_str(), "mov" | "mp4" | "avi" | "mkv" | "3gp" | "m4v");
         let is_jpeg = matches!(file_ext.as_str(), "jpg" | "jpeg");
 
         // Method 1: For JPEG files, try ultra-fast JPEG reader first (specialized zero-copy optimization)
@@ -96,9 +97,8 @@ impl ExifProcessor {
             }
         }
 
-        // Method 5: Use file modification time as last resort
-        warn!("Using file modification time for: {}", file_path.display());
-        self.extract_file_mtime(file_path)
+        // No valid EXIF timestamp found - ignore the file
+        anyhow::bail!("No valid EXIF timestamp found for: {}", file_path.display())
     }
 
     /// Extract EXIF data using fast-exif-rs (ultra-fast pure Rust implementation)
@@ -187,23 +187,6 @@ impl ExifProcessor {
     }
 
 
-    fn extract_file_mtime(&self, file_path: &Path) -> Result<ExifData> {
-        let metadata = std::fs::metadata(file_path)
-            .context("Failed to read file metadata")?;
-
-        let mtime = metadata.modified()
-            .context("Failed to get file modification time")?;
-
-        let timestamp = DateTime::<Utc>::from(mtime);
-        let mut metadata_map = HashMap::new();
-        metadata_map.insert("ModifyDate".to_string(), timestamp.format("%Y:%m:%d %H:%M:%S").to_string());
-
-        Ok(ExifData {
-            timestamp,
-            milliseconds: 0,
-            metadata: metadata_map,
-        })
-    }
 
     /// Extract the best available timestamp from EXIF data using comprehensive fallback hierarchy
     /// 
@@ -238,25 +221,29 @@ impl ExifProcessor {
     }
 
     fn extract_video_timestamp(&self, metadata: &HashMap<String, String>) -> Result<(DateTime<Utc>, u16)> {
+        // Priority order for video timestamps (avoiding unreliable file system dates)
         let timestamp_fields = [
             "DateTimeOriginal",
-            "NikonDateTime", 
-            "MediaCreateDate",
+            "CreationDate",
+            "MediaCreateDate", 
+            "TrackCreateDate",
+            "Create Date",
+            "MakerNotes:CreateDate",
             "MediaModifyDate",
+            "TrackModifyDate",
+            "Modify Date",
+            "MakerNotes:ModifyDate",
+            "NikonDateTime",
             "ModifyDate",
         ];
 
         for field in timestamp_fields {
             if let Some(timestamp_str) = metadata.get(field) {
-                if let Ok((dt, ms)) = self.parse_timestamp_with_subseconds(timestamp_str) {
-                    return Ok((dt, ms));
+                // Skip file system dates that are unreliable
+                if field.contains("File") && self.is_recent_timestamp(timestamp_str) {
+                    continue;
                 }
-            }
-        }
-
-        // LAST RESORT: CreateDate
-        if let Some(timestamp_str) = metadata.get("CreateDate") {
-            if !self.is_zero_timestamp(timestamp_str) {
+                
                 if let Ok((dt, ms)) = self.parse_timestamp_with_subseconds(timestamp_str) {
                     return Ok((dt, ms));
                 }
@@ -300,24 +287,25 @@ impl ExifProcessor {
             }
         }
 
-        // 3. Fallback to base timestamps only
+        // 3. Fallback to base timestamps only (avoiding file system dates)
         let fallback_fields = [
             "DateTimeOriginal",
+            "CreationDate",
+            "Create Date",
+            "MakerNotes:CreateDate",
             "ModifyDate",
+            "Modify Date", 
+            "MakerNotes:ModifyDate",
             "DateTimeDigitized"
         ];
 
         for field in fallback_fields {
             if let Some(timestamp_str) = metadata.get(field) {
-                if let Ok((dt, ms)) = self.parse_timestamp_with_subseconds(timestamp_str) {
-                    return Ok((dt, ms));
+                // Skip file system dates that are unreliable
+                if field.contains("File") && self.is_recent_timestamp(timestamp_str) {
+                    continue;
                 }
-            }
-        }
-
-        // 4. LAST RESORT: CreateDate
-        if let Some(timestamp_str) = metadata.get("CreateDate") {
-            if !self.is_zero_timestamp(timestamp_str) {
+                
                 if let Ok((dt, ms)) = self.parse_timestamp_with_subseconds(timestamp_str) {
                     return Ok((dt, ms));
                 }
@@ -372,5 +360,15 @@ impl ExifProcessor {
 
     fn is_zero_timestamp(&self, timestamp_str: &str) -> bool {
         timestamp_str.replace(':', "").replace(' ', "").replace('0', "").is_empty()
+    }
+
+    /// Check if a timestamp is suspiciously recent (likely a file system date)
+    fn is_recent_timestamp(&self, timestamp_str: &str) -> bool {
+        if let Ok((dt, _)) = self.parse_timestamp_with_subseconds(timestamp_str) {
+            // If timestamp is after 2024, it's likely a file system date
+            dt.year() > 2024
+        } else {
+            false
+        }
     }
 }
