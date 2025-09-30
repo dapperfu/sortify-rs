@@ -16,6 +16,10 @@ path = "src/lib.rs"
 name = "exif_performance_benchmark"
 harness = false
 
+[[bin]]
+name = "test_exif_writer"
+path = "test_exif_writer.rs"
+
 
 [dependencies]
 # CLI and argument parsing

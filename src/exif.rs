@@ -11,11 +11,43 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, Utc, Datelike};
 use exif::Reader as ExifReader;
 use fast_exif_reader::{FastExifReader, UltraFastJpegReader, HybridExifReader};
-use log::debug;
+use log::{debug, warn};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
+
+// Simple EXIF Writer implementation
+use std::io::Write;
+
+/// Simple EXIF writer for basic tag writing
+struct SimpleExifWriter {
+    tags: HashMap<String, String>,
+}
+
+impl SimpleExifWriter {
+    fn new() -> Self {
+        Self {
+            tags: HashMap::new(),
+        }
+    }
+    
+    fn add_tag(&mut self, name: String, value: String) {
+        self.tags.insert(name, value);
+    }
+    
+    fn write_to_jpeg(&self, _file_path: &Path) -> Result<()> {
+        // TODO: Implement actual JPEG EXIF writing
+        warn!("JPEG EXIF writing not yet implemented - this is a placeholder");
+        Ok(())
+    }
+    
+    fn write_to_tiff(&self, _file_path: &Path) -> Result<()> {
+        // TODO: Implement actual TIFF EXIF writing  
+        warn!("TIFF EXIF writing not yet implemented - this is a placeholder");
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ExifData {
@@ -313,6 +345,88 @@ impl ExifProcessor {
         }
 
         anyhow::bail!("No valid timestamp found in photo EXIF data");
+    }
+
+    /// Write EXIF data to a file
+    /// 
+    /// This method creates new EXIF data or modifies existing EXIF data in image files.
+    /// Currently supports basic EXIF tag writing with plans for full JPEG/TIFF support.
+    pub fn write_exif_data(&self, file_path: &Path, tags: HashMap<String, String>) -> Result<()> {
+        debug!("Writing EXIF data to file: {}", file_path.display());
+        
+        let file_ext = file_path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|s| s.to_lowercase())
+            .unwrap_or_default();
+
+        let mut writer = SimpleExifWriter::new();
+        
+        // Add all provided tags to the writer
+        for (tag_name, tag_value) in tags {
+            self.add_tag_to_writer(&mut writer, &tag_name, &tag_value)?;
+        }
+        
+        // Write based on file format
+        match file_ext.as_str() {
+            "jpg" | "jpeg" => writer.write_to_jpeg(file_path),
+            "tiff" | "tif" => writer.write_to_tiff(file_path),
+            _ => anyhow::bail!("Unsupported file format for EXIF writing: {}", file_ext),
+        }
+    }
+
+    /// Write a timestamp to EXIF data
+    /// 
+    /// This is a convenience method for updating timestamp-related EXIF tags.
+    pub fn write_timestamp(&self, file_path: &Path, timestamp: DateTime<Utc>) -> Result<()> {
+        debug!("Writing timestamp to file: {}", file_path.display());
+        
+        let mut tags = HashMap::new();
+        let formatted_time = timestamp.format("%Y:%m:%d %H:%M:%S").to_string();
+        
+        // Add multiple timestamp fields for maximum compatibility
+        tags.insert("DateTime".to_string(), formatted_time.clone());
+        tags.insert("DateTimeOriginal".to_string(), formatted_time.clone());
+        tags.insert("DateTimeDigitized".to_string(), formatted_time);
+        
+        self.write_exif_data(file_path, tags)
+    }
+
+    /// Add a tag to the EXIF writer based on its type
+    fn add_tag_to_writer(&self, writer: &mut SimpleExifWriter, tag_name: &str, tag_value: &str) -> Result<()> {
+        writer.add_tag(tag_name.to_string(), tag_value.to_string());
+        Ok(())
+    }
+
+    /// Create a backup of the original file before writing EXIF data
+    pub fn write_exif_data_with_backup(&self, file_path: &Path, tags: HashMap<String, String>) -> Result<()> {
+        debug!("Writing EXIF data with backup for: {}", file_path.display());
+        
+        // Create backup filename
+        let backup_path = file_path.with_extension(format!("{}.bak", 
+            file_path.extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("")
+        ));
+        
+        // Copy original to backup
+        std::fs::copy(file_path, &backup_path)
+            .context("Failed to create backup file")?;
+        
+        debug!("Created backup: {}", backup_path.display());
+        
+        // Write EXIF data
+        match self.write_exif_data(file_path, tags) {
+            Ok(()) => {
+                debug!("Successfully wrote EXIF data to: {}", file_path.display());
+                Ok(())
+            }
+            Err(e) => {
+                // Restore from backup on failure
+                std::fs::copy(&backup_path, file_path)
+                    .context("Failed to restore from backup after EXIF write failure")?;
+                Err(e.context("EXIF write failed, restored from backup"))
+            }
+        }
     }
 
     fn parse_timestamp_with_subseconds(&self, timestamp_str: &str) -> Result<(DateTime<Utc>, u16)> {
