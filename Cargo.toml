@@ -16,9 +16,6 @@ path = "src/lib.rs"
 name = "exif_performance_benchmark"
 harness = false
 
-[[bin]]
-name = "test_complete_exif_writer"
-path = "test_complete_exif_writer.rs"
 
 
 [dependencies]
