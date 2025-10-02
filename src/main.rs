@@ -66,7 +66,7 @@ enum Commands {
         #[arg(short, long, default_value = "move")]
         mode: String,
     },
-    /// Process all image files in one or more directories recursively
+    /// Process all image files in one or more directories (recursive by default)
     Batch {
         /// Directories to process
         directories: Vec<PathBuf>,
@@ -82,6 +82,9 @@ enum Commands {
         /// File operation mode: move (default), copy, or symlink
         #[arg(short, long, default_value = "move")]
         mode: String,
+        /// Disable recursive directory traversal (only process files in immediate directory)
+        #[arg(long)]
+        no_recursive: bool,
     },
     /// Write EXIF data to image files
     Write {
@@ -137,8 +140,8 @@ fn main() -> Result<()> {
         Commands::Files { files, workers, output_dir, mode } => {
             process_files(files, workers, output_dir, mode)
         }
-        Commands::Batch { directories, workers, limit, output_dir, mode } => {
-            process_batch(directories, workers, limit, output_dir, mode)
+        Commands::Batch { directories, workers, limit, output_dir, mode, no_recursive } => {
+            process_batch(directories, workers, limit, output_dir, mode, !no_recursive)
         }
         Commands::Write { files, timestamp, artist, copyright, description, backup } => {
             write_exif_data(files, timestamp, artist, copyright, description, backup)
@@ -184,6 +187,7 @@ fn process_batch(
     limit: usize,
     output_dir: PathBuf,
     mode: String,
+    recursive: bool,
 ) -> Result<()> {
     if directories.is_empty() {
         anyhow::bail!("No directories specified");
@@ -193,8 +197,8 @@ fn process_batch(
     let mut all_files = Vec::new();
     
     for directory in &directories {
-        info!("Scanning directory: {}", directory.display());
-        let files = find_image_files(directory)?;
+        info!("Scanning directory: {} (recursive: {})", directory.display(), recursive);
+        let files = find_image_files(directory, recursive)?;
         all_files.extend(files);
         info!("Found {} files in {}", all_files.len(), directory.display());
     }
@@ -218,7 +222,7 @@ fn process_batch(
     Ok(())
 }
 
-fn find_image_files(directory: &Path) -> Result<Vec<PathBuf>> {
+fn find_image_files(directory: &Path, recursive: bool) -> Result<Vec<PathBuf>> {
     let extensions = [
         "jpg", "jpeg", "png", "tiff", "tif", "hif", "heic", "cr2",
         "mov", "mp4", "avi", "3gp", "dng", "m4v", "mkv"
@@ -226,7 +230,13 @@ fn find_image_files(directory: &Path) -> Result<Vec<PathBuf>> {
 
     let mut files = Vec::new();
     
-    for entry in WalkDir::new(directory).into_iter().filter_map(|e| e.ok()) {
+    let walkdir = if recursive {
+        WalkDir::new(directory)
+    } else {
+        WalkDir::new(directory).max_depth(1)
+    };
+    
+    for entry in walkdir.into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_file() {
             if let Some(ext) = entry.path().extension() {
                 if let Some(ext_str) = ext.to_str() {
