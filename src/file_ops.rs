@@ -112,7 +112,7 @@ impl FileProcessor {
         Ok(results)
     }
 
-    fn analyze_files_parallel(&self, files: Vec<PathBuf>) -> Result<Vec<AnalysisResult>> {
+    fn analyze_files_parallel(&mut self, files: Vec<PathBuf>) -> Result<Vec<AnalysisResult>> {
         let pb = ProgressBar::new(files.len() as u64);
         pb.set_style(
             ProgressStyle::default_bar()
@@ -127,11 +127,14 @@ impl FileProcessor {
         let chunk_size = std::cmp::max(100, files.len() / rayon::current_num_threads());
         let pb = Arc::new(pb);
         
+        // Create a new ExifProcessor for each thread to avoid borrowing issues
         let results: Vec<AnalysisResult> = files
             .par_chunks(chunk_size)
             .flat_map(|chunk| {
                 chunk.par_iter().map(|file_path| {
-                    let result = self.analyze_single_file(file_path);
+                    // Create a new processor for each thread
+                    let mut temp_processor = crate::exif::ExifProcessor::new();
+                    let result = temp_processor.analyze_single_file(file_path);
                     pb.inc(1);
                     result
                 }).collect::<Vec<_>>()
@@ -142,7 +145,7 @@ impl FileProcessor {
         Ok(results)
     }
 
-    fn analyze_single_file(&self, file_path: &Path) -> AnalysisResult {
+    fn analyze_single_file(&mut self, file_path: &Path) -> AnalysisResult {
         // Skip symlinks
         if file_path.is_symlink() {
             return AnalysisResult {
@@ -454,10 +457,10 @@ impl FileProcessor {
 }
 
 #[derive(Debug, Clone)]
-struct AnalysisResult {
-    file_path: PathBuf,
-    success: bool,
-    error: Option<String>,
-    exif_data: Option<ExifData>,
-    new_filename: Option<String>,
+pub struct AnalysisResult {
+    pub file_path: PathBuf,
+    pub success: bool,
+    pub error: Option<String>,
+    pub exif_data: Option<ExifData>,
+    pub new_filename: Option<String>,
 }

@@ -2,23 +2,18 @@
  * EXIF processing module with fast-exif-rs implementation
  * 
  * Processing order (fastest to slowest):
- * 1. fast-exif-rs (ultra-fast pure Rust, 55.6x faster than standard libraries)
- * 2. kamadak-exif (pure Rust, good compatibility) 
- * 3. File modification time (last resort)
+ * 1. Optimal EXIF parser (automatic optimization with ultra-seek, memory mapping, SIMD)
+ * 2. fast-exif-rs (ultra-fast pure Rust, works for all formats)
  */
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, Utc, Datelike};
-use exif::Reader as ExifReader;
-use fast_exif_reader::{FastExifReader, UltraFastJpegReader, HybridExifReader};
-use log::{debug, warn};
+use fast_exif_reader::{
+    FastExifReader, OptimalExifParser
+};
+use log::debug;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::BufReader;
 use std::path::Path;
-
-// EXIF Writer implementation inline
-use std::io::Write;
 
 /// Simple EXIF writer for basic tag writing
 struct ExifWriter {
@@ -247,43 +242,69 @@ pub struct ExifData {
     pub metadata: HashMap<String, String>,
 }
 
-pub struct ExifProcessor;
+pub struct ExifProcessor {
+    /// Optimal EXIF parser for automatic optimization
+    optimal_parser: OptimalExifParser,
+    /// Essential fields for timestamp extraction only
+    essential_fields: Vec<String>,
+}
 
 impl ExifProcessor {
     pub fn new() -> Self {
-        Self
+        // Define essential fields for timestamp extraction only
+        let essential_fields = vec![
+            "Make".to_string(),
+            "Model".to_string(),
+            "DateTime".to_string(),
+            "DateTimeOriginal".to_string(),
+            "DateTimeDigitized".to_string(),
+            "ModifyDate".to_string(),
+            "CreateDate".to_string(),
+            "SubSecTime".to_string(),
+            "SubSecTimeOriginal".to_string(),
+            "SubSecTimeDigitized".to_string(),
+            "SubSecCreateDate".to_string(),
+            "SubSecModifyDate".to_string(),
+            "SubSecDateTimeOriginal".to_string(),
+        ];
+
+        Self {
+            optimal_parser: OptimalExifParser::new(),
+            essential_fields,
+        }
     }
 
-    /// Extract EXIF data from file using fast-exif-rs with comprehensive fallback strategy
+    /// Extract EXIF data from file using optimized fast-exif-rs with intelligent parser selection
     /// 
     /// Processing order (fastest to slowest):
-    /// 1. Ultra-fast JPEG reader (for JPEG files only, zero-copy optimization)
+    /// 1. Optimal EXIF parser (automatic optimization with ultra-seek, memory mapping, SIMD)
     /// 2. fast-exif-rs (ultra-fast pure Rust, works for all formats)
-    /// 3. Hybrid reader (balanced performance and compatibility)
-    /// 4. kamadak-exif (pure Rust, good compatibility) 
     /// 
     /// Note: File modification time fallback has been removed as it's unreliable.
     /// Files without valid EXIF timestamps will be ignored.
-    pub fn extract_exif_data(&self, file_path: &Path) -> Result<ExifData> {
+    pub fn extract_exif_data(&mut self, file_path: &Path) -> Result<ExifData> {
         debug!("Processing file: {}", file_path.display());
+
+        // Get file size to determine optimal parsing strategy
+        let _file_size = std::fs::metadata(file_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
 
         let file_ext = file_path.extension()
             .and_then(|ext| ext.to_str())
             .map(|s| s.to_lowercase())
             .unwrap_or_default();
 
-        let is_jpeg = matches!(file_ext.as_str(), "jpg" | "jpeg");
+        let _is_jpeg = matches!(file_ext.as_str(), "jpg" | "jpeg");
 
-        // Method 1: For JPEG files, try ultra-fast JPEG reader first (specialized zero-copy optimization)
-        if is_jpeg {
-            match self.extract_exif_data_ultra_fast_jpeg(file_path) {
-                Ok(data) => {
-                    debug!("ultra-fast JPEG reader succeeded for: {}", file_path.display());
-                    return Ok(data);
-                }
-                Err(e) => {
-                    debug!("ultra-fast JPEG reader failed for {}: {}", file_path.display(), e);
-                }
+        // Method 1: Optimal EXIF parser (automatic optimization based on file size and format)
+        match self.extract_exif_data_optimal(file_path) {
+            Ok(data) => {
+                debug!("optimal parser succeeded for: {}", file_path.display());
+                return Ok(data);
+            }
+            Err(e) => {
+                debug!("optimal parser failed for {}: {}", file_path.display(), e);
             }
         }
 
@@ -298,30 +319,62 @@ impl ExifProcessor {
             }
         }
 
-        // Method 3: Try hybrid reader for better compatibility
-        match self.extract_exif_data_hybrid(file_path) {
-            Ok(data) => {
-                debug!("hybrid reader succeeded for: {}", file_path.display());
-                return Ok(data);
-            }
-            Err(e) => {
-                debug!("hybrid reader failed for {}: {}", file_path.display(), e);
-            }
-        }
-
-        // Method 4: Try kamadak-exif (pure Rust, good compatibility)
-        match self.extract_exif_data_kamadak(file_path) {
-            Ok(data) => {
-                debug!("kamadak-exif succeeded for: {}", file_path.display());
-                return Ok(data);
-            }
-            Err(e) => {
-                debug!("kamadak-exif failed for {}: {}", file_path.display(), e);
-            }
-        }
-
         // No valid EXIF timestamp found - ignore the file
         anyhow::bail!("No valid EXIF timestamp found for: {}", file_path.display())
+    }
+
+    /// Extract EXIF data using optimal EXIF parser (automatic optimization)
+    pub fn extract_exif_data_optimal(&mut self, file_path: &Path) -> Result<ExifData> {
+        debug!("Using optimal EXIF parser for: {}", file_path.display());
+        
+        let file_path_str = file_path.to_string_lossy().to_string();
+        let metadata = self.optimal_parser.parse_file(&file_path_str)
+            .map_err(|e| anyhow::anyhow!("optimal parser failed: {}", e))?;
+
+        // Extract best timestamp
+        let (timestamp, milliseconds) = self.extract_best_timestamp(&metadata)?;
+
+        Ok(ExifData {
+            timestamp,
+            milliseconds,
+            metadata,
+        })
+    }
+
+    /// Analyze a single file and return analysis result
+    pub fn analyze_single_file(&mut self, file_path: &Path) -> crate::file_ops::AnalysisResult {
+        // Skip symlinks
+        if file_path.is_symlink() {
+            return crate::file_ops::AnalysisResult {
+                file_path: file_path.to_path_buf(),
+                success: false,
+                exif_data: None,
+                error: Some("Skipping symlink".to_string()),
+                new_filename: None,
+            };
+        }
+
+        // Try to extract EXIF data
+        match self.extract_exif_data(file_path) {
+            Ok(exif_data) => {
+                crate::file_ops::AnalysisResult {
+                    file_path: file_path.to_path_buf(),
+                    success: true,
+                    exif_data: Some(exif_data),
+                    error: None,
+                    new_filename: None,
+                }
+            }
+            Err(e) => {
+                crate::file_ops::AnalysisResult {
+                    file_path: file_path.to_path_buf(),
+                    success: false,
+                    exif_data: None,
+                    error: Some(e.to_string()),
+                    new_filename: None,
+                }
+            }
+        }
     }
 
     /// Extract EXIF data using fast-exif-rs (ultra-fast pure Rust implementation)
@@ -345,74 +398,6 @@ impl ExifProcessor {
             metadata,
         })
     }
-
-    /// Extract EXIF data using ultra-fast JPEG reader (specialized for JPEG files)
-    pub fn extract_exif_data_ultra_fast_jpeg(&self, file_path: &Path) -> Result<ExifData> {
-        debug!("Using ultra-fast JPEG reader for: {}", file_path.display());
-        
-        let mut ultra_reader = UltraFastJpegReader::new();
-        let file_path_str = file_path.to_string_lossy().to_string();
-        let metadata = ultra_reader.read_file(&file_path_str)
-            .map_err(|e| anyhow::anyhow!("ultra-fast JPEG reader failed: {}", e))?;
-
-        // Extract best timestamp
-        let (timestamp, milliseconds) = self.extract_best_timestamp(&metadata)?;
-
-        Ok(ExifData {
-            timestamp,
-            milliseconds,
-            metadata,
-        })
-    }
-
-    /// Extract EXIF data using hybrid reader (balanced performance and compatibility)
-    pub fn extract_exif_data_hybrid(&self, file_path: &Path) -> Result<ExifData> {
-        debug!("Using hybrid reader for: {}", file_path.display());
-        
-        let mut hybrid_reader = HybridExifReader::new();
-        let file_path_str = file_path.to_string_lossy().to_string();
-        let metadata = hybrid_reader.read_file(&file_path_str)
-            .map_err(|e| anyhow::anyhow!("hybrid reader failed: {}", e))?;
-
-        // Extract best timestamp
-        let (timestamp, milliseconds) = self.extract_best_timestamp(&metadata)?;
-
-        Ok(ExifData {
-            timestamp,
-            milliseconds,
-            metadata,
-        })
-    }
-
-    pub fn extract_exif_data_kamadak(&self, file_path: &Path) -> Result<ExifData> {
-        let file = File::open(file_path)
-            .context("Failed to open file for kamadak-exif")?;
-        let mut bufreader = BufReader::new(&file);
-        
-        let exifreader = ExifReader::new();
-        let exif = exifreader.read_from_container(&mut bufreader)
-            .context("Failed to read EXIF data with kamadak-exif")?;
-
-        let mut metadata = HashMap::new();
-        
-        // Extract all EXIF fields
-        for field in exif.fields() {
-            let tag_name = field.tag.to_string();
-            let value = field.display_value().with_unit(&exif).to_string();
-            metadata.insert(tag_name, value);
-        }
-
-        // Extract best timestamp
-        let (timestamp, milliseconds) = self.extract_best_timestamp(&metadata)?;
-
-        Ok(ExifData {
-            timestamp,
-            milliseconds,
-            metadata,
-        })
-    }
-
-
 
     /// Extract the best available timestamp from EXIF data using comprehensive fallback hierarchy
     /// 

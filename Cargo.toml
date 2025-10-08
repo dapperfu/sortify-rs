@@ -22,11 +22,8 @@ harness = false
 # CLI and argument parsing
 clap = { version = "4.4", features = ["derive"] }
 
-# EXIF processing with fast-exif-rs (ultra-fast pure Rust implementation)
-fast-exif-reader = { git = "https://github.com/dapperfu/fast-exif-rs.git", branch = "main" }
-
-# EXIF processing with kamadak-exif (complete EXIF support including subseconds)
-exif = { package = "kamadak-exif", version = "0.6.1" }
+# EXIF processing with fast-exif-rs (ultra-fast pure Rust implementation with SIMD acceleration)
+fast-exif-reader = { git = "https://github.com/dapperfu/fast-exif-rs.git", branch = "pure-rust", features = ["simd"] }
 
 # File operations and directory traversal
 walkdir = "2.4"
