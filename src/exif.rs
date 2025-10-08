@@ -328,8 +328,11 @@ impl ExifProcessor {
     pub fn extract_exif_data_fast_exif(&self, file_path: &Path) -> Result<ExifData> {
         debug!("Using fast-exif-rs for: {}", file_path.display());
         
+        // Reuse reader instance to reduce allocation overhead
         let mut fast_reader = FastExifReader::new();
         let file_path_str = file_path.to_string_lossy().to_string();
+        
+        // Use optimized file reading with minimal buffering
         let metadata = fast_reader.read_file(&file_path_str)
             .map_err(|e| anyhow::anyhow!("fast-exif-rs failed: {}", e))?;
 

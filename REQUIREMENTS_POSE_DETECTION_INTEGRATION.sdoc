@@ -1,0 +1,423 @@
+REQUIREMENTS_SPECIFICATION:
+  TITLE: Pose Detection Integration for sb detect Command
+  VERSION: 1.0.0
+  DATE: 2024-12-19
+  AUTHORS:
+    - NAME: Claude Sonnet 4 (claude-3-5-sonnet-20241022)
+      AFFILIATION: Generated via Cursor IDE (cursor.sh) with AI assistance
+  STATUS: Draft
+  PREFIX: PD
+  DOMAIN: Sports Photography Analysis
+  CUSTOM_FIELDS:
+    - TITLE: Implementation Priority
+      VALUE: High
+    - TITLE: Complexity Level
+      VALUE: Medium
+    - TITLE: Estimated Effort
+      VALUE: 2-3 days
+    - TITLE: Dependencies
+      VALUE: MediaPipe, MMPose (optional)
+
+PURPOSE:
+  This document specifies the requirements for integrating pose detection functionality into the existing `sb detect` command, enabling unified face, object, and pose detection in a single processing pass.
+
+SCOPE:
+  The integration shall extend the current unified detection system to include pose detection capabilities while maintaining backward compatibility and performance characteristics.
+
+STAKEHOLDERS:
+  - PRIMARY: Sports photographers using sb detect for comprehensive image analysis
+  - SECONDARY: Developers maintaining the sportball package
+  - TERTIARY: Users of jersey splitting and color analysis features
+
+REFERENCES:
+  - REFERENCE: Current sb detect implementation
+    TITLE: Unified Detection Commands
+    LOCATION: sportball/cli/commands/unified_commands.py
+  - REFERENCE: Pose detection implementation
+    TITLE: Pose Detection Module
+    LOCATION: sportball/detectors/pose.py
+  - REFERENCE: Core unified detection
+    TITLE: SportballCore detect_unified method
+    LOCATION: sportball/core.py
+
+REQUIREMENTS:
+
+[REQUIREMENT]
+UID: PD-001
+TITLE: Pose Detection Integration in Unified Detection
+STATEMENT: The system SHALL integrate pose detection into the existing `sb detect` unified detection process alongside face and object detection.
+RATIONALE: Users need comprehensive analysis including pose information for sports photography without running separate commands.
+PRIORITY: High
+VERIFICATION: Test that `sb detect` command includes pose detection results in output.
+
+[REQUIREMENT]
+UID: PD-002
+TITLE: Single Image Processing Pass
+STATEMENT: The system SHALL process each image only once, running face detection, object detection, and pose detection on the same loaded image for efficiency.
+RATIONALE: Loading images multiple times is inefficient and impacts performance.
+PRIORITY: High
+VERIFICATION: Verify that each image is loaded only once during unified detection.
+
+[REQUIREMENT]
+UID: PD-003
+TITLE: Pose Detection Backend Support
+STATEMENT: The system SHALL support both MediaPipe and MMPose backends for pose detection, with MediaPipe as the default backend.
+RATIONALE: Different backends provide different accuracy/performance trade-offs and availability.
+PRIORITY: Medium
+VERIFICATION: Test pose detection with both MediaPipe and MMPose backends.
+
+[REQUIREMENT]
+UID: PD-004
+TITLE: Pose Detection Configuration Options
+STATEMENT: The system SHALL provide CLI options for configuring pose detection parameters including confidence threshold, backend selection, and enable/disable flags.
+RATIONALE: Users need control over pose detection behavior and performance.
+PRIORITY: Medium
+VERIFICATION: Test CLI options for pose detection configuration.
+
+[REQUIREMENT]
+UID: PD-005
+TITLE: Pose Detection Results Integration
+STATEMENT: The system SHALL include pose detection results in the unified detection output alongside face and object detection results.
+RATIONALE: Users expect comprehensive results from unified detection command.
+PRIORITY: High
+VERIFICATION: Verify pose detection results are included in command output.
+
+[REQUIREMENT]
+UID: PD-006
+TITLE: Sidecar File Integration
+STATEMENT: The system SHALL save pose detection results to sidecar files alongside face and object detection data in a unified format.
+RATIONALE: Sidecar files provide persistent storage and enable downstream processing.
+PRIORITY: High
+VERIFICATION: Test that pose detection data is saved to sidecar files.
+
+[REQUIREMENT]
+UID: PD-007
+TITLE: Pose Detection Performance Optimization
+STATEMENT: The system SHALL maintain performance characteristics similar to current unified detection, with pose detection adding minimal overhead.
+RATIONALE: Performance is critical for processing large image collections.
+PRIORITY: High
+VERIFICATION: Benchmark unified detection with and without pose detection.
+
+[REQUIREMENT]
+UID: PD-008
+TITLE: Pose Detection Error Handling
+STATEMENT: The system SHALL handle pose detection failures gracefully without affecting face and object detection results.
+RATIONALE: Robust error handling ensures reliable operation when pose detection fails.
+PRIORITY: Medium
+VERIFICATION: Test error handling when pose detection fails.
+
+[REQUIREMENT]
+UID: PD-009
+TITLE: Pose Detection Progress Reporting
+STATEMENT: The system SHALL include pose detection progress in unified detection progress reporting and verbose output.
+RATIONALE: Users need visibility into pose detection progress during processing.
+PRIORITY: Low
+VERIFICATION: Test progress reporting includes pose detection information.
+
+[REQUIREMENT]
+UID: PD-010
+TITLE: Pose Detection Result Format
+STATEMENT: The system SHALL provide pose detection results in a consistent format including keypoints, confidence scores, upper body bounding boxes, and processing metadata.
+RATIONALE: Consistent format enables downstream processing and analysis.
+PRIORITY: High
+VERIFICATION: Test pose detection result format consistency.
+
+[REQUIREMENT]
+UID: PD-011
+TITLE: Pose Detection Caching
+STATEMENT: The system SHALL support caching of pose detection results to avoid reprocessing when sidecar files exist, consistent with face and object detection behavior.
+RATIONALE: Caching improves performance for repeated processing of the same images.
+PRIORITY: Medium
+VERIFICATION: Test pose detection result caching behavior.
+
+[REQUIREMENT]
+UID: PD-012
+TITLE: Pose Detection GPU Acceleration
+STATEMENT: The system SHALL support GPU acceleration for pose detection when available, consistent with face and object detection GPU support.
+RATIONALE: GPU acceleration significantly improves pose detection performance.
+PRIORITY: Medium
+VERIFICATION: Test pose detection with GPU acceleration enabled.
+
+[REQUIREMENT]
+UID: PD-013
+TITLE: Pose Detection Parallel Processing
+STATEMENT: The system SHALL support parallel processing of pose detection when multiple workers are specified, consistent with face and object detection parallelization.
+RATIONALE: Parallel processing improves throughput for large image collections.
+PRIORITY: Medium
+VERIFICATION: Test pose detection with multiple workers.
+
+[REQUIREMENT]
+UID: PD-014
+TITLE: Pose Detection Backward Compatibility
+STATEMENT: The system SHALL maintain backward compatibility with existing `sb detect` usage patterns and output formats.
+RATIONALE: Existing users and scripts must continue to work without modification.
+PRIORITY: High
+VERIFICATION: Test existing sb detect usage patterns still work.
+
+[REQUIREMENT]
+UID: PD-015
+TITLE: Pose Detection Documentation
+STATEMENT: The system SHALL provide comprehensive documentation for pose detection integration including CLI options, output format, and usage examples.
+RATIONALE: Users need clear documentation to effectively use pose detection features.
+PRIORITY: Medium
+VERIFICATION: Review documentation completeness and accuracy.
+
+[REQUIREMENT]
+UID: PD-016
+TITLE: Pose Detection Testing
+STATEMENT: The system SHALL include comprehensive tests for pose detection integration including unit tests, integration tests, and performance tests.
+RATIONALE: Testing ensures reliability and performance of pose detection integration.
+PRIORITY: High
+VERIFICATION: Review test coverage and test execution results.
+
+[REQUIREMENT]
+UID: PD-017
+TITLE: Pose Detection Dependencies
+STATEMENT: The system SHALL handle optional pose detection dependencies gracefully, providing clear error messages when dependencies are missing.
+RATIONALE: Users need clear guidance when pose detection dependencies are not available.
+PRIORITY: Medium
+VERIFICATION: Test behavior when pose detection dependencies are missing.
+
+[REQUIREMENT]
+UID: PD-018
+TITLE: Pose Detection Memory Management
+STATEMENT: The system SHALL manage memory efficiently during pose detection to avoid memory leaks and excessive memory usage.
+RATIONALE: Efficient memory management is critical for processing large image collections.
+PRIORITY: Medium
+VERIFICATION: Test memory usage during pose detection processing.
+
+[REQUIREMENT]
+UID: PD-019
+TITLE: Pose Detection Result Validation
+STATEMENT: The system SHALL validate pose detection results for consistency and completeness before including them in output.
+RATIONALE: Result validation ensures data quality and prevents downstream processing errors.
+PRIORITY: Medium
+VERIFICATION: Test pose detection result validation with various input images.
+
+[REQUIREMENT]
+UID: PD-020
+TITLE: Pose Detection Configuration Persistence
+STATEMENT: The system SHALL allow pose detection configuration to be persisted and loaded from configuration files.
+RATIONALE: Configuration persistence enables consistent pose detection settings across sessions.
+PRIORITY: Low
+VERIFICATION: Test pose detection configuration persistence.
+
+IMPLEMENTATION_DETAILS:
+
+[IMPLEMENTATION_DETAIL]
+UID: PD-IMP-001
+TITLE: Core Integration Points
+DESCRIPTION: |
+  The pose detection integration shall modify the following components:
+  
+  1. **SportballCore.detect_unified()** - Add pose detection to unified detection process
+  2. **SportballCore._process_single_image_unified()** - Include pose detection in single image processing
+  3. **unified_commands.py detect()** - Add pose detection CLI options
+  4. **SidecarManager** - Extend to handle pose detection data storage
+  
+  The integration shall maintain the existing architecture while adding pose detection capabilities.
+
+[IMPLEMENTATION_DETAIL]
+UID: PD-IMP-002
+TITLE: CLI Options Extension
+DESCRIPTION: |
+  The following CLI options shall be added to the `sb detect` command:
+  
+  - `--pose-confidence FLOAT` - Pose detection confidence threshold (default: 0.7)
+  - `--pose-backend TEXT` - Pose detection backend ('mediapipe' or 'mmpose', default: 'mediapipe')
+  - `--enable-pose/--disable-pose` - Enable/disable pose detection (default: enabled)
+  - `--pose-gpu/--pose-cpu` - Force GPU/CPU for pose detection (default: auto)
+  
+  These options shall be integrated into the existing CLI argument parsing.
+
+[IMPLEMENTATION_DETAIL]
+UID: PD-IMP-003
+TITLE: Result Format Specification
+DESCRIPTION: |
+  Pose detection results shall be included in the unified detection output with the following structure:
+  
+  ```json
+  {
+    "pose_detection": {
+      "success": true,
+      "poses": [
+        {
+          "person_id": 0,
+          "confidence": 0.85,
+          "keypoints": [
+            {
+              "name": "nose",
+              "x": 0.5,
+              "y": 0.3,
+              "confidence": 0.9
+            }
+          ],
+          "upper_body_bbox": [100, 50, 200, 300],
+          "processing_time": 0.15
+        }
+      ],
+      "processing_time": 0.15,
+      "backend": "mediapipe",
+      "error": null
+    }
+  }
+  ```
+
+[IMPLEMENTATION_DETAIL]
+UID: PD-IMP-004
+TITLE: Performance Considerations
+DESCRIPTION: |
+  The pose detection integration shall consider the following performance aspects:
+  
+  1. **Lazy Loading** - Pose detector shall be initialized only when needed
+  2. **Memory Management** - Efficient handling of pose detection models
+  3. **GPU Utilization** - Proper GPU memory management for pose detection
+  4. **Caching Strategy** - Consistent caching behavior with face/object detection
+  5. **Parallel Processing** - Thread-safe pose detection for parallel workers
+  
+  Performance benchmarks shall be established to measure impact.
+
+[IMPLEMENTATION_DETAIL]
+UID: PD-IMP-005
+TITLE: Error Handling Strategy
+DESCRIPTION: |
+  The pose detection integration shall implement comprehensive error handling:
+  
+  1. **Dependency Errors** - Clear messages when MediaPipe/MMPose unavailable
+  2. **Model Loading Errors** - Graceful handling of model initialization failures
+  3. **Processing Errors** - Individual image failures don't affect batch processing
+  4. **GPU Errors** - Fallback to CPU when GPU processing fails
+  5. **Memory Errors** - Proper cleanup and error reporting for memory issues
+  
+  Error handling shall be consistent with existing face/object detection patterns.
+
+[IMPLEMENTATION_DETAIL]
+UID: PD-IMP-006
+TITLE: Testing Strategy
+DESCRIPTION: |
+  Comprehensive testing shall be implemented for pose detection integration:
+  
+  1. **Unit Tests** - Test individual pose detection components
+  2. **Integration Tests** - Test pose detection within unified detection
+  3. **Performance Tests** - Benchmark pose detection performance impact
+  4. **Error Handling Tests** - Test error scenarios and edge cases
+  5. **Compatibility Tests** - Test backward compatibility with existing usage
+  
+  Test coverage shall be maintained at >90% for new code.
+
+ACCEPTANCE_CRITERIA:
+
+[ACCEPTANCE_CRITERION]
+UID: PD-AC-001
+TITLE: Functional Integration
+STATEMENT: The `sb detect` command SHALL successfully detect poses alongside faces and objects in a single processing pass.
+VERIFICATION: Execute `sb detect` on test images and verify pose detection results are included in output.
+
+[ACCEPTANCE_CRITERION]
+UID: PD-AC-002
+TITLE: Performance Maintenance
+STATEMENT: The unified detection with pose detection SHALL maintain performance within 20% of current unified detection without pose detection.
+VERIFICATION: Benchmark unified detection with and without pose detection on representative image sets.
+
+[ACCEPTANCE_CRITERION]
+UID: PD-AC-003
+TITLE: CLI Functionality
+STATEMENT: All pose detection CLI options SHALL function correctly and be properly documented in help output.
+VERIFICATION: Test all pose detection CLI options and verify help documentation accuracy.
+
+[ACCEPTANCE_CRITERION]
+UID: PD-AC-004
+TITLE: Sidecar Integration
+STATEMENT: Pose detection results SHALL be properly saved to and loaded from sidecar files.
+VERIFICATION: Test sidecar file creation and loading with pose detection data.
+
+[ACCEPTANCE_CRITERION]
+UID: PD-AC-005
+TITLE: Error Handling
+STATEMENT: Pose detection failures SHALL not affect face and object detection results.
+VERIFICATION: Test error scenarios where pose detection fails but face/object detection succeeds.
+
+[ACCEPTANCE_CRITERION]
+UID: PD-AC-006
+TITLE: Backward Compatibility
+STATEMENT: Existing `sb detect` usage patterns SHALL continue to work without modification.
+VERIFICATION: Test existing scripts and usage patterns with pose detection integration.
+
+[ACCEPTANCE_CRITERION]
+UID: PD-AC-007
+TITLE: Documentation Completeness
+STATEMENT: All pose detection features SHALL be documented with examples and usage instructions.
+VERIFICATION: Review documentation for completeness and accuracy.
+
+[ACCEPTANCE_CRITERION]
+UID: PD-AC-008
+TITLE: Test Coverage
+STATEMENT: Test coverage for pose detection integration SHALL be maintained at >90%.
+VERIFICATION: Review test coverage reports and ensure comprehensive testing.
+
+RISKS:
+
+[RISK]
+UID: PD-RISK-001
+TITLE: Performance Impact
+DESCRIPTION: Pose detection may significantly impact unified detection performance.
+MITIGATION: Implement performance monitoring and optimization, with option to disable pose detection if needed.
+
+[RISK]
+UID: PD-RISK-002
+TITLE: Dependency Issues
+DESCRIPTION: MediaPipe/MMPose dependencies may cause installation or compatibility issues.
+MITIGATION: Implement graceful fallback when dependencies unavailable, with clear error messages.
+
+[RISK]
+UID: PD-RISK-003
+TITLE: Memory Usage
+DESCRIPTION: Pose detection models may consume significant memory, especially with GPU acceleration.
+MITIGATION: Implement memory monitoring and efficient model management.
+
+[RISK]
+UID: PD-RISK-004
+TITLE: Backward Compatibility
+DESCRIPTION: Integration changes may break existing functionality.
+MITIGATION: Comprehensive testing and gradual rollout with backward compatibility checks.
+
+[RISK]
+UID: PD-RISK-005
+TITLE: Result Format Changes
+DESCRIPTION: Adding pose detection may change output format and break downstream processing.
+MITIGATION: Maintain existing format structure while adding pose detection data as additional fields.
+
+CONSTRAINTS:
+
+[CONSTRAINT]
+UID: PD-CONST-001
+TITLE: Backward Compatibility
+DESCRIPTION: The integration SHALL maintain backward compatibility with existing sb detect usage.
+RATIONALE: Existing users and scripts must continue to work without modification.
+
+[CONSTRAINT]
+UID: PD-CONST-002
+TITLE: Performance Budget
+DESCRIPTION: Pose detection integration SHALL not increase unified detection time by more than 50%.
+RATIONALE: Performance is critical for processing large image collections.
+
+[CONSTRAINT]
+UID: PD-CONST-003
+TITLE: Memory Constraints
+DESCRIPTION: Pose detection SHALL not increase memory usage by more than 100% compared to current unified detection.
+RATIONALE: Memory constraints are important for processing large image collections.
+
+[CONSTRAINT]
+UID: PD-CONST-004
+TITLE: Dependency Management
+DESCRIPTION: Pose detection dependencies SHALL be optional and gracefully handled when unavailable.
+RATIONALE: Not all users may need pose detection functionality.
+
+[CONSTRAINT]
+UID: PD-CONST-005
+TITLE: Code Quality
+DESCRIPTION: All new code SHALL maintain the same quality standards as existing codebase.
+RATIONALE: Code quality is important for maintainability and reliability.
+
+NOTES:
+  This requirements document provides comprehensive specifications for integrating pose detection into the sb detect command. The implementation should follow the existing patterns and architecture while adding pose detection capabilities in a seamless manner.

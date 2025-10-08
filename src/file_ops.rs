@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{info, warn};
 use rayon::prelude::*;
+use rayon::ThreadPoolBuilder;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -53,6 +54,36 @@ pub struct FileProcessor {
 
 impl FileProcessor {
     pub fn new(workers: Option<usize>) -> Self {
+        // Configure rayon thread pool for optimal I/O bound performance
+        if let Some(worker_count) = workers {
+            // For I/O bound workloads, use fewer threads than CPU cores to reduce contention
+            let optimal_threads = std::cmp::min(worker_count, num_cpus::get() / 2).max(1);
+            
+            info!("Configuring rayon thread pool with {} threads (requested: {}, CPUs: {})", 
+                  optimal_threads, worker_count, num_cpus::get());
+            
+            ThreadPoolBuilder::new()
+                .num_threads(optimal_threads)
+                .thread_name(|i| format!("sortify-worker-{}", i))
+                .build_global()
+                .unwrap_or_else(|_| {
+                    warn!("Failed to configure rayon thread pool, using default");
+                });
+        } else {
+            // Default: use half of CPU cores for I/O bound work
+            let default_threads = (num_cpus::get() / 2).max(1);
+            info!("Using default thread pool with {} threads (CPUs: {})", 
+                  default_threads, num_cpus::get());
+            
+            ThreadPoolBuilder::new()
+                .num_threads(default_threads)
+                .thread_name(|i| format!("sortify-worker-{}", i))
+                .build_global()
+                .unwrap_or_else(|_| {
+                    warn!("Failed to configure rayon thread pool, using default");
+                });
+        }
+
         Self {
             workers,
             exif_processor: ExifProcessor::new(),
@@ -75,8 +106,8 @@ impl FileProcessor {
         // Build content hash index for duplicate detection
         let hash_index = self.build_content_hash_index(&analysis_results, output_dir)?;
 
-        // Second pass: Handle file operations sequentially to avoid conflicts
-        let results = self.rename_files_sequential(analysis_results, &hash_index, output_dir, mode)?;
+        // Second pass: Handle file operations with parallel directory processing
+        let results = self.rename_files_parallel(analysis_results, &hash_index, output_dir, mode)?;
 
         Ok(results)
     }
@@ -92,13 +123,18 @@ impl FileProcessor {
         pb.set_message("Analyzing files");
 
         // Use parallel processing with rayon for maximum performance
+        // Process files in chunks to reduce memory pressure and improve cache locality
+        let chunk_size = std::cmp::max(100, files.len() / rayon::current_num_threads());
         let pb = Arc::new(pb);
+        
         let results: Vec<AnalysisResult> = files
-            .into_par_iter()
-            .map(|file_path| {
-                let result = self.analyze_single_file(&file_path);
-                pb.inc(1);
-                result
+            .par_chunks(chunk_size)
+            .flat_map(|chunk| {
+                chunk.par_iter().map(|file_path| {
+                    let result = self.analyze_single_file(file_path);
+                    pb.inc(1);
+                    result
+                }).collect::<Vec<_>>()
             })
             .collect();
 
@@ -211,7 +247,7 @@ impl FileProcessor {
         Ok(hash_index)
     }
 
-    fn rename_files_sequential(
+    fn rename_files_parallel(
         &self,
         analysis_results: Vec<AnalysisResult>,
         hash_index: &HashMap<PathBuf, String>,
@@ -227,39 +263,70 @@ impl FileProcessor {
         );
         pb.set_message("Renaming files");
 
-        let mut results = Vec::new();
-        let mut existing_files = Vec::new();
-
+        // Group files by target directory to minimize conflicts
+        let mut grouped_results = HashMap::new();
         for result in analysis_results {
-            let process_result = self.process_single_file_rename(
-                result,
-                hash_index,
-                output_dir,
-                &mut existing_files,
-                mode,
-            );
-
-            match &process_result {
-                ProcessResult { renamed: true, .. } => {
-                    let msg = format!("Renamed: {}", process_result.file_path.display());
-                    pb.set_message(msg);
-                }
-                ProcessResult { success: false, .. } => {
-                    let msg = format!("Error: {}", process_result.file_path.display());
-                    pb.set_message(msg);
-                }
-                _ => {
-                    let msg = format!("Skipped: {}", process_result.file_path.display());
-                    pb.set_message(msg);
-                }
+            if let Some(exif_data) = &result.exif_data {
+                let target_dir = output_dir.join(format!("{}/{}", 
+                    exif_data.timestamp.format("%Y"), 
+                    exif_data.timestamp.format("%m-%b")));
+                grouped_results.entry(target_dir).or_insert_with(Vec::new).push(result);
             }
+        }
 
-            results.push(process_result);
-            pb.inc(1);
+        // Process each directory group in parallel
+        let pb = Arc::new(pb);
+        let hash_index = Arc::new(hash_index);
+        let output_dir = Arc::new(output_dir.to_path_buf());
+        
+        let mut all_results = Vec::new();
+        
+        // Process directory groups in parallel
+        let group_results: Vec<Vec<ProcessResult>> = grouped_results
+            .into_par_iter()
+            .map(|(_target_dir, results)| {
+                let mut group_results = Vec::new();
+                let mut existing_files = Vec::new();
+                
+                // Within each group, process files sequentially to avoid conflicts
+                for result in results {
+                    let process_result = self.process_single_file_rename(
+                        result,
+                        &hash_index,
+                        &output_dir,
+                        &mut existing_files,
+                        mode,
+                    );
+                    group_results.push(process_result);
+                }
+                group_results
+            })
+            .collect();
+
+        // Flatten results and update progress
+        for group_result in group_results {
+            for process_result in group_result {
+                match &process_result {
+                    ProcessResult { renamed: true, .. } => {
+                        let msg = format!("Renamed: {}", process_result.file_path.display());
+                        pb.set_message(msg);
+                    }
+                    ProcessResult { success: false, .. } => {
+                        let msg = format!("Error: {}", process_result.file_path.display());
+                        pb.set_message(msg);
+                    }
+                    _ => {
+                        let msg = format!("Skipped: {}", process_result.file_path.display());
+                        pb.set_message(msg);
+                    }
+                }
+                all_results.push(process_result);
+                pb.inc(1);
+            }
         }
 
         pb.finish_with_message("Renaming complete");
-        Ok(results)
+        Ok(all_results)
     }
 
     fn process_single_file_rename(
@@ -280,7 +347,7 @@ impl FileProcessor {
             };
         }
 
-        let (exif_data, new_filename) = match (analysis_result.exif_data, analysis_result.new_filename) {
+        let (exif_data, _new_filename) = match (analysis_result.exif_data, analysis_result.new_filename) {
             (Some(exif_data), Some(filename)) => (exif_data, filename),
             _ => {
                 return ProcessResult {

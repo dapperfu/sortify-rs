@@ -56,7 +56,7 @@ enum Commands {
     Files {
         /// Files to process
         files: Vec<PathBuf>,
-        /// Number of parallel workers (default: CPU count)
+        /// Number of parallel workers (default: CPU count / 2 for I/O optimization)
         #[arg(short, long)]
         workers: Option<usize>,
         /// Output directory for organized files (default: current directory)
@@ -70,7 +70,7 @@ enum Commands {
     Batch {
         /// Directories to process
         directories: Vec<PathBuf>,
-        /// Number of parallel workers (default: CPU count)
+        /// Number of parallel workers (default: CPU count / 2 for I/O optimization)
         #[arg(short, long)]
         workers: Option<usize>,
         /// Limit number of images to process (0=all, default: 0)
