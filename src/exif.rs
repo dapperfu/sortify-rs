@@ -619,14 +619,30 @@ impl ExifProcessor {
     fn parse_timestamp_with_subseconds(&self, timestamp_str: &str) -> Result<(DateTime<Utc>, u16)> {
         let timestamp_str = timestamp_str.trim();
         
-        // Handle EXIF format timestamps from kamadak-exif
+        // Handle EXIF format timestamps with timezone information
+        // Format: 2025:10:12 16:26:03.12-04:00 or 2025:09:24 08:20:49.680
         let (main_part, subsec_part) = if timestamp_str.contains('.') {
-            // Standard EXIF format: 2025:09:24 08:20:49.680 or 2025-09-24 08:20:49.680
-            let parts: Vec<&str> = timestamp_str.split('.').collect();
-            if parts.len() != 2 {
-                anyhow::bail!("Invalid timestamp format: {}", timestamp_str);
+            // Find the last dot before any timezone info
+            let dot_pos = timestamp_str.rfind('.').unwrap();
+            let after_dot = &timestamp_str[dot_pos + 1..];
+            
+            // Check if there's timezone info after the subseconds
+            let timezone_pos = after_dot.find(|c: char| c == '+' || c == '-');
+            
+            if let Some(tz_pos) = timezone_pos {
+                // Has timezone info: 2025:10:12 16:26:03.12-04:00
+                let subsec_with_tz = &timestamp_str[dot_pos + 1..];
+                let subsec_part = &subsec_with_tz[..tz_pos];
+                let main_part = &timestamp_str[..dot_pos];
+                (main_part.to_string(), subsec_part.to_string())
+            } else {
+                // No timezone info: 2025:09:24 08:20:49.680
+                let parts: Vec<&str> = timestamp_str.split('.').collect();
+                if parts.len() != 2 {
+                    anyhow::bail!("Invalid timestamp format: {}", timestamp_str);
+                }
+                (parts[0].to_string(), parts[1].to_string())
             }
-            (parts[0].to_string(), parts[1].to_string())
         } else {
             // No subseconds
             (timestamp_str.to_string(), "0".to_string())

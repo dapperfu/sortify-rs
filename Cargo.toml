@@ -23,7 +23,8 @@ harness = false
 clap = { version = "4.4", features = ["derive"] }
 
 # EXIF processing with fast-exif-rs (ultra-fast pure Rust implementation with SIMD acceleration)
-fast-exif-reader = { git = "https://github.com/dapperfu/fast-exif-rs.git", branch = "pure-rust", features = ["simd"] }
+# Temporarily using local fixed version for NEF support
+fast-exif-reader = { path = "/tmp/fast-exif-rs", features = ["simd"] }
 
 # File operations and directory traversal
 walkdir = "2.4"
