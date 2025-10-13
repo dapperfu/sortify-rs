@@ -38,7 +38,7 @@ File operation modes:
 - copy: Copy files to organized structure, keep originals  
 - symlink: Create symbolic links to organized structure
 
-Supported file types: JPG, JPEG, PNG, TIFF, HIF, MOV, MP4, AVI
+Supported file types: JPG, JPEG, PNG, TIFF, HIF, HEIC, CR2, DNG, NEF, MOV, MP4, AVI
 Output format: YYYY/MM-Mon/YYYYMMDD_HHMMSS.fff<ext>
 Tie-breaking: Files with identical timestamps get -2, -3, etc. suffixes")]
 struct Cli {
@@ -224,7 +224,7 @@ fn process_batch(
 
 fn find_image_files(directory: &Path, recursive: bool) -> Result<Vec<PathBuf>> {
     let extensions = [
-        "jpg", "jpeg", "png", "tiff", "tif", "hif", "heic", "cr2",
+        "jpg", "jpeg", "png", "tiff", "tif", "hif", "heic", "cr2", "nef",
         "mov", "mp4", "avi", "3gp", "dng", "m4v", "mkv"
     ];
 

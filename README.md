@@ -126,7 +126,7 @@ cp target/release/sortify-rs /usr/local/bin/
 
 ## Supported File Types
 
-- **Images**: JPG, JPEG, PNG, TIFF, HIF, HEIC, CR2, DNG
+- **Images**: JPG, JPEG, PNG, TIFF, HIF, HEIC, CR2, DNG, NEF
 - **Videos**: MOV, MP4, AVI, 3GP, M4V, MKV
 
 ## Output Format
