@@ -1,6 +1,6 @@
 [package]
 name = "sortify-rs"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 authors = ["Sortify Team <sortify@example.com>"]
 description = "Image and video file organizer based on EXIF timestamps"
