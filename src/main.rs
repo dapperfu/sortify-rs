@@ -263,6 +263,29 @@ fn print_summary(results: &[ProcessResult]) {
     println!("Files skipped: {}", skipped);
     println!("Errors: {}", errors);
 
+    // Break down skip reasons
+    if skipped > 0 {
+        println!("\nSkip reasons:");
+        let mut skip_reasons = std::collections::HashMap::new();
+        
+        for result in results.iter().filter(|r| r.success && !r.renamed) {
+            let reason = result.error.as_deref().unwrap_or("Unknown reason");
+            let count = skip_reasons.entry(reason).or_insert(0);
+            *count += 1;
+        }
+        
+        for (reason, count) in skip_reasons {
+            println!("  {}: {} files", reason, count);
+        }
+        
+        // Show detailed list of skipped files
+        println!("\nSkipped files:");
+        for result in results.iter().filter(|r| r.success && !r.renamed) {
+            let reason = result.error.as_deref().unwrap_or("Unknown reason");
+            println!("  {}: {}", result.file_path.display(), reason);
+        }
+    }
+
     if errors > 0 {
         println!("\nErrors:");
         for result in results.iter().filter(|r| !r.success) {

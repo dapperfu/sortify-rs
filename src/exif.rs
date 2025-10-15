@@ -347,9 +347,9 @@ impl ExifProcessor {
         if file_path.is_symlink() {
             return crate::file_ops::AnalysisResult {
                 file_path: file_path.to_path_buf(),
-                success: false,
+                success: true,  // Mark as success so it shows up in skipped files
                 exif_data: None,
-                error: Some("Skipping symlink".to_string()),
+                error: Some("Skipped symlink - cannot process symbolic links".to_string()),
                 new_filename: None,
             };
         }

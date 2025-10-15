@@ -197,8 +197,8 @@ impl FileProcessor {
         if file_path.is_symlink() {
             return AnalysisResult {
                 file_path: file_path.to_path_buf(),
-                success: false,
-                error: Some("Skipped symlink".to_string()),
+                success: true,  // Mark as success so it shows up in skipped files
+                error: Some("Skipped symlink - cannot process symbolic links".to_string()),
                 exif_data: None,
                 new_filename: None,
             };
@@ -320,13 +320,23 @@ impl FileProcessor {
 
         // Group files by target directory to minimize conflicts
         let mut grouped_results = HashMap::new();
+        let mut files_without_exif = Vec::new();
+        
         for result in analysis_results {
             if let Some(exif_data) = &result.exif_data {
                 let target_dir = output_dir.join(format!("{}/{}", 
                     exif_data.timestamp.format("%Y"), 
                     exif_data.timestamp.format("%m-%b")));
                 grouped_results.entry(target_dir).or_insert_with(Vec::new).push(result);
+            } else {
+                // Files without EXIF data (like symlinks) go to a special group
+                files_without_exif.push(result);
             }
+        }
+        
+        // Add files without EXIF data to a special group
+        if !files_without_exif.is_empty() {
+            grouped_results.insert(output_dir.to_path_buf(), files_without_exif);
         }
 
         // Process each directory group in parallel
@@ -405,12 +415,13 @@ impl FileProcessor {
         let (exif_data, _new_filename) = match (analysis_result.exif_data, analysis_result.new_filename) {
             (Some(exif_data), Some(filename)) => (exif_data, filename),
             _ => {
+                // Files without EXIF data (like symlinks) should be skipped, not treated as errors
                 return ProcessResult {
                     file_path: analysis_result.file_path,
-                    success: false,
+                    success: true,
                     renamed: false,
                     new_path: None,
-                    error: Some("Missing EXIF data or filename".to_string()),
+                    error: analysis_result.error,
                 };
             }
         };
@@ -437,10 +448,12 @@ impl FileProcessor {
                         success: true,
                         renamed: false,
                         new_path: None,
-                        error: Some("Content duplicate".to_string()),
+                        error: Some("Content duplicate - file already exists with same content (safe to delete)".to_string()),
                     };
                 }
+                // If hashes are different, continue with renaming (will add suffix)
             }
+            // If no hash info available, continue with renaming (will add suffix)
         }
 
         // Create directory structure
@@ -463,7 +476,7 @@ impl FileProcessor {
                 success: true,
                 renamed: false,
                 new_path: None,
-                error: Some("No rename needed".to_string()),
+                error: Some("No rename needed - file already in correct location".to_string()),
             };
         }
 
