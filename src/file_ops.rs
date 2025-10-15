@@ -244,7 +244,6 @@ impl FileProcessor {
         analysis_results: &[AnalysisResult],
         output_dir: &Path,
     ) -> Result<HashMap<PathBuf, String>> {
-        // Hash all files to detect content duplicates, especially those with identical EXIF timestamps
         let mut files_to_hash = Vec::new();
         let mut target_paths = HashMap::new();
         let mut timestamp_groups = HashMap::new();
@@ -260,21 +259,25 @@ impl FileProcessor {
                     let timestamp_key = format!("{}_{}", exif_data.timestamp.timestamp(), exif_data.milliseconds);
                     timestamp_groups.entry(timestamp_key).or_insert_with(Vec::new).push(result.file_path.clone());
                     
-                    // Always hash input files
-                    files_to_hash.push(result.file_path.clone());
-                    
-                    // Also hash existing target files
+                    // Only hash files that would have collisions
                     if target_path.exists() {
+                        // Target file already exists - hash both files
+                        files_to_hash.push(result.file_path.clone());
                         files_to_hash.push(target_path);
                     }
                 }
             }
         }
 
-        // If we have files with identical timestamps, we definitely need to hash them
-        let has_duplicate_timestamps = timestamp_groups.values().any(|group| group.len() > 1);
-        
-        if files_to_hash.is_empty() && !has_duplicate_timestamps {
+        // Only hash files with identical timestamps (potential duplicates)
+        for group in timestamp_groups.values() {
+            if group.len() > 1 {
+                // Multiple files with same timestamp - hash all of them
+                files_to_hash.extend(group.iter().cloned());
+            }
+        }
+
+        if files_to_hash.is_empty() {
             info!("No file conflicts detected, skipping hash index building");
             return Ok(HashMap::new());
         }
