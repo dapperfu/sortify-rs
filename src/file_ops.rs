@@ -4,7 +4,7 @@
 
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
-use log::{info, warn};
+use log::{debug, info, warn};
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use std::collections::HashMap;
@@ -160,12 +160,17 @@ impl FileProcessor {
         match self.exif_processor.extract_exif_data(file_path) {
             Ok(exif_data) => {
                 let extension = self.get_file_extension(file_path);
+                debug!("Generated extension: '{}' for file: {}", extension, file_path.display());
+                debug!("EXIF timestamp: {} ({}ms)", exif_data.timestamp, exif_data.milliseconds);
+                
                 let new_filename = self.filename_generator.generate_filename(
                     exif_data.timestamp,
                     exif_data.milliseconds,
                     &extension,
                     &[], // Will be updated with existing files later
                 );
+                
+                debug!("Generated filename: '{}'", new_filename);
 
                 AnalysisResult {
                     file_path: file_path.to_path_buf(),

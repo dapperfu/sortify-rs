@@ -357,12 +357,27 @@ impl ExifProcessor {
         // Try to extract EXIF data
         match self.extract_exif_data(file_path) {
             Ok(exif_data) => {
+                // Generate filename for the extracted EXIF data
+                let extension = self.get_file_extension(file_path);
+                debug!("Generated extension: '{}' for file: {}", extension, file_path.display());
+                debug!("EXIF timestamp: {} ({}ms)", exif_data.timestamp, exif_data.milliseconds);
+                
+                let filename_generator = crate::naming::FilenameGenerator::new();
+                let new_filename = filename_generator.generate_filename(
+                    exif_data.timestamp,
+                    exif_data.milliseconds,
+                    &extension,
+                    &[], // Will be updated with existing files later
+                );
+                
+                debug!("Generated filename: '{}'", new_filename);
+
                 crate::file_ops::AnalysisResult {
                     file_path: file_path.to_path_buf(),
                     success: true,
                     exif_data: Some(exif_data),
                     error: None,
-                    new_filename: None,
+                    new_filename: Some(new_filename),
                 }
             }
             Err(e) => {
@@ -375,6 +390,23 @@ impl ExifProcessor {
                 }
             }
         }
+    }
+
+    /// Get file extension helper method
+    fn get_file_extension(&self, file_path: &Path) -> String {
+        file_path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|s| {
+                let ext = s.to_lowercase();
+                // Handle malformed extensions
+                match ext.as_str() {
+                    "%jpg" | "%jpeg" => "jpg".to_string(),
+                    "%mov" => "mov".to_string(),
+                    "%mp4" => "mp4".to_string(),
+                    _ => ext,
+                }
+            })
+            .unwrap_or_else(|| "".to_string())
     }
 
     /// Extract EXIF data using fast-exif-rs (ultra-fast pure Rust implementation)
@@ -432,6 +464,8 @@ impl ExifProcessor {
     }
 
     fn extract_video_timestamp(&self, metadata: &HashMap<String, String>) -> Result<(DateTime<Utc>, u16)> {
+        debug!("Extracting video timestamp from {} metadata fields", metadata.len());
+        
         // Priority order for video timestamps (avoiding unreliable file system dates)
         let timestamp_fields = [
             "DateTimeOriginal",
@@ -450,17 +484,29 @@ impl ExifProcessor {
 
         for field in timestamp_fields {
             if let Some(timestamp_str) = metadata.get(field) {
+                debug!("Found field {}: '{}'", field, timestamp_str);
+                
                 // Skip file system dates that are unreliable
                 if field.contains("File") && self.is_recent_timestamp(timestamp_str) {
+                    debug!("Skipping file system date: {}", field);
                     continue;
                 }
                 
-                if let Ok((dt, ms)) = self.parse_timestamp_with_subseconds(timestamp_str) {
-                    return Ok((dt, ms));
+                match self.parse_timestamp_with_subseconds(timestamp_str) {
+                    Ok((dt, ms)) => {
+                        debug!("Successfully parsed {}: {} ({}ms)", field, dt, ms);
+                        return Ok((dt, ms));
+                    }
+                    Err(e) => {
+                        debug!("Failed to parse {}: {}", field, e);
+                    }
                 }
+            } else {
+                debug!("Field {} not found in metadata", field);
             }
         }
 
+        debug!("No valid timestamp found in video EXIF data");
         anyhow::bail!("No valid timestamp found in video EXIF data");
     }
 
@@ -616,7 +662,7 @@ impl ExifProcessor {
         }
     }
 
-    fn parse_timestamp_with_subseconds(&self, timestamp_str: &str) -> Result<(DateTime<Utc>, u16)> {
+    pub fn parse_timestamp_with_subseconds(&self, timestamp_str: &str) -> Result<(DateTime<Utc>, u16)> {
         let timestamp_str = timestamp_str.trim();
         
         // Handle EXIF format timestamps with timezone information
