@@ -18,18 +18,59 @@ use crate::naming::FilenameGenerator;
 
 /// Perform file operation based on mode
 fn perform_file_operation(source_path: &Path, target_path: &Path, mode: &str) -> Result<()> {
+    debug!("Attempting {} operation: '{}' -> '{}'", mode, source_path.display(), target_path.display());
+    
+    // Check if source file exists
+    if !source_path.exists() {
+        anyhow::bail!("Source file does not exist: {}", source_path.display());
+    }
+    
+    // Check if target directory exists
+    if let Some(parent) = target_path.parent() {
+        if !parent.exists() {
+            debug!("Creating target directory: {}", parent.display());
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create target directory: {}", parent.display()))?;
+        }
+    }
+    
     match mode {
         "move" => {
-            fs::rename(source_path, target_path)
-                .context("Failed to move file")?;
+            debug!("Performing move operation");
+            match fs::rename(source_path, target_path) {
+                Ok(_) => {
+                    debug!("Move operation successful");
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
+                    debug!("Cross-device move detected, using copy+delete strategy");
+                    // Copy the file first
+                    fs::copy(source_path, target_path)
+                        .with_context(|| format!("Failed to copy file from '{}' to '{}'", 
+                            source_path.display(), target_path.display()))?;
+                    // Then delete the original
+                    fs::remove_file(source_path)
+                        .with_context(|| format!("Failed to remove original file: {}", source_path.display()))?;
+                    debug!("Cross-device move operation successful");
+                }
+                Err(e) => {
+                    return Err(e).with_context(|| format!("Failed to move file from '{}' to '{}'", 
+                        source_path.display(), target_path.display()));
+                }
+            }
         }
         "copy" => {
+            debug!("Performing copy operation");
             fs::copy(source_path, target_path)
-                .context("Failed to copy file")?;
+                .with_context(|| format!("Failed to copy file from '{}' to '{}'", 
+                    source_path.display(), target_path.display()))?;
+            debug!("Copy operation successful");
         }
         "symlink" => {
+            debug!("Performing symlink operation");
             std::os::unix::fs::symlink(source_path, target_path)
-                .context("Failed to create symlink")?;
+                .with_context(|| format!("Failed to create symlink from '{}' to '{}'", 
+                    source_path.display(), target_path.display()))?;
+            debug!("Symlink operation successful");
         }
         _ => anyhow::bail!("Invalid mode: {}. Must be 'move', 'copy', or 'symlink'", mode),
     }
@@ -96,18 +137,24 @@ impl FileProcessor {
     pub fn process_files(&mut self, files: Vec<PathBuf>, output_dir: &Path, mode: &str) -> Result<Vec<ProcessResult>> {
         info!("Processing {} files", files.len());
 
-        // Create output directory if it doesn't exist
-        fs::create_dir_all(output_dir)
-            .context("Failed to create output directory")?;
+        // Convert output directory to absolute path to avoid issues with relative paths
+        let output_dir = output_dir.canonicalize()
+            .or_else(|_| {
+                // If canonicalize fails (e.g., directory doesn't exist), create it and try again
+                fs::create_dir_all(output_dir)
+                    .context("Failed to create output directory")?;
+                output_dir.canonicalize()
+                    .context("Failed to canonicalize output directory")
+            })?;
 
         // First pass: Extract EXIF data and generate filenames in parallel
         let analysis_results = self.analyze_files_parallel(files.clone())?;
 
         // Build content hash index for duplicate detection
-        let hash_index = self.build_content_hash_index(&analysis_results, output_dir)?;
+        let hash_index = self.build_content_hash_index(&analysis_results, &output_dir)?;
 
         // Second pass: Handle file operations with parallel directory processing
-        let results = self.rename_files_parallel(analysis_results, &hash_index, output_dir, mode)?;
+        let results = self.rename_files_parallel(analysis_results, &hash_index, &output_dir, mode)?;
 
         Ok(results)
     }
