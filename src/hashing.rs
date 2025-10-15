@@ -48,7 +48,7 @@ impl ContentHasher {
     }
 
     /// Build an index of file content hashes for multiple files
-    pub fn build_content_hash_index<'a>(
+    pub fn _build_content_hash_index<'a>(
         &self,
         file_paths: &[&'a Path],
     ) -> Result<HashMap<&'a Path, String>> {
@@ -69,7 +69,7 @@ impl ContentHasher {
     }
 
     /// Build content hash index for directory structure
-    pub fn build_content_hash_index_for_directory(
+    pub fn _build_content_hash_index_for_directory(
         &self,
         directory: &Path,
     ) -> Result<HashMap<String, String>> {
@@ -92,7 +92,7 @@ impl ContentHasher {
     }
 
     /// Check if a file is a content duplicate of an existing file
-    pub fn is_content_duplicate(
+    pub fn _is_content_duplicate(
         &self,
         file_path: &Path,
         existing_hash_index: &HashMap<String, String>,

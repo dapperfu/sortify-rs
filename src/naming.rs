@@ -6,13 +6,13 @@ use chrono::{DateTime, Utc, Datelike, Timelike};
 use std::collections::HashSet;
 
 pub struct FilenameGenerator {
-    existing_files: HashSet<String>,
+    _existing_files: HashSet<String>,
 }
 
 impl FilenameGenerator {
     pub fn new() -> Self {
         Self {
-            existing_files: HashSet::new(),
+            _existing_files: HashSet::new(),
         }
     }
 
@@ -63,7 +63,7 @@ impl FilenameGenerator {
     }
 
     /// Generate filename with content-based duplicate checking
-    pub fn generate_filename_with_duplicate_check(
+    pub fn _generate_filename_with_duplicate_check(
         &self,
         dt: DateTime<Utc>,
         milliseconds: u16,
@@ -74,7 +74,7 @@ impl FilenameGenerator {
         target_directory: &std::path::Path,
     ) -> (String, bool) {
         // Check for content duplicates first
-        if let Some(duplicate_path) = self.check_content_duplicate(file_path, existing_hash_index, target_directory) {
+        if let Some(_duplicate_path) = self._check_content_duplicate(file_path, existing_hash_index, target_directory) {
             return ("".to_string(), true);
         }
 
@@ -83,11 +83,11 @@ impl FilenameGenerator {
         (filename, false)
     }
 
-    fn check_content_duplicate(
+    fn _check_content_duplicate(
         &self,
-        file_path: &std::path::Path,
-        existing_hash_index: &std::collections::HashMap<std::path::PathBuf, String>,
-        target_directory: &std::path::Path,
+        _file_path: &std::path::Path,
+        _existing_hash_index: &std::collections::HashMap<std::path::PathBuf, String>,
+        _target_directory: &std::path::Path,
     ) -> Option<std::path::PathBuf> {
         // This would need to be implemented with the content hasher
         // For now, return None to indicate no duplicate found

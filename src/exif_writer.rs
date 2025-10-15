@@ -10,10 +10,9 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use log::{debug, warn};
+use log::debug;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::Write;
 use std::path::Path;
 
 /// EXIF tag types as defined in EXIF specification
@@ -63,8 +62,8 @@ pub struct ExifIfd {
 /// EXIF writer for creating and modifying EXIF data
 pub struct ExifWriter {
     primary_ifd: ExifIfd,
-    exif_ifd: Option<ExifIfd>,
-    thumbnail_ifd: Option<ExifIfd>,
+    _exif_ifd: Option<ExifIfd>,
+    _thumbnail_ifd: Option<ExifIfd>,
     is_little_endian: bool,
 }
 
@@ -75,8 +74,8 @@ impl ExifWriter {
                 entries: Vec::new(),
                 next_ifd_offset: 0,
             },
-            exif_ifd: None,
-            thumbnail_ifd: None,
+            _exif_ifd: None,
+            _thumbnail_ifd: None,
             is_little_endian: true, // Default to little-endian
         }
     }
@@ -407,7 +406,7 @@ impl ExifWriter {
 
     /// Write IFD (Image File Directory) structure
     fn write_ifd(&self, data: &mut Vec<u8>, ifd: &ExifIfd) -> Result<()> {
-        let ifd_start = data.len();
+        let _ifd_start = data.len();
         
         // Write number of directory entries
         let count = ifd.entries.len() as u16;

@@ -355,7 +355,7 @@ fn write_exif_data(
         
         let result = if let Some(timestamp_str) = &timestamp {
             // Parse timestamp and write it
-            let dt = DateTime::parse_from_rfc3339(timestamp_str)
+            let _dt = DateTime::parse_from_rfc3339(timestamp_str)
                 .context("Invalid timestamp format. Use YYYY-MM-DDTHH:MM:SSZ")?
                 .with_timezone(&Utc);
             
@@ -428,7 +428,7 @@ fn modify_exif_data(
         
         let result = if let Some(timestamp_str) = &timestamp {
             // Parse timestamp and write it
-            let dt = DateTime::parse_from_rfc3339(timestamp_str)
+            let _dt = DateTime::parse_from_rfc3339(timestamp_str)
                 .context("Invalid timestamp format. Use YYYY-MM-DDTHH:MM:SSZ")?
                 .with_timezone(&Utc);
             

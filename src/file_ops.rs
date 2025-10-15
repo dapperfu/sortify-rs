@@ -82,13 +82,13 @@ pub struct ProcessResult {
     pub file_path: PathBuf,
     pub success: bool,
     pub renamed: bool,
-    pub new_path: Option<PathBuf>,
+    pub _new_path: Option<PathBuf>,
     pub error: Option<String>,
 }
 
 pub struct FileProcessor {
-    workers: Option<usize>,
-    exif_processor: ExifProcessor,
+    _workers: Option<usize>,
+    _exif_processor: ExifProcessor,
     filename_generator: FilenameGenerator,
     content_hasher: ContentHasher,
 }
@@ -126,8 +126,8 @@ impl FileProcessor {
         }
 
         Self {
-            workers,
-            exif_processor: ExifProcessor::new(),
+            _workers: workers,
+            _exif_processor: ExifProcessor::new(),
             filename_generator: FilenameGenerator::new(),
             content_hasher: ContentHasher::new(),
         }
@@ -192,7 +192,7 @@ impl FileProcessor {
         Ok(results)
     }
 
-    fn analyze_single_file(&mut self, file_path: &Path) -> AnalysisResult {
+    fn _analyze_single_file(&mut self, file_path: &Path) -> AnalysisResult {
         // Skip symlinks
         if file_path.is_symlink() {
             return AnalysisResult {
@@ -204,7 +204,7 @@ impl FileProcessor {
             };
         }
 
-        match self.exif_processor.extract_exif_data(file_path) {
+        match self._exif_processor.extract_exif_data(file_path) {
             Ok(exif_data) => {
                 let extension = self.get_file_extension(file_path);
                 debug!("Generated extension: '{}' for file: {}", extension, file_path.display());
@@ -407,7 +407,7 @@ impl FileProcessor {
                 file_path: analysis_result.file_path,
                 success: false,
                 renamed: false,
-                new_path: None,
+                _new_path: None,
                 error: analysis_result.error,
             };
         }
@@ -420,7 +420,7 @@ impl FileProcessor {
                     file_path: analysis_result.file_path,
                     success: true,
                     renamed: false,
-                    new_path: None,
+                    _new_path: None,
                     error: analysis_result.error,
                 };
             }
@@ -447,7 +447,7 @@ impl FileProcessor {
                         file_path: analysis_result.file_path,
                         success: true,
                         renamed: false,
-                        new_path: None,
+                        _new_path: None,
                         error: Some("Content duplicate - file already exists with same content (safe to delete)".to_string()),
                     };
                 }
@@ -463,7 +463,7 @@ impl FileProcessor {
                     file_path: analysis_result.file_path,
                     success: false,
                     renamed: false,
-                    new_path: None,
+                    _new_path: None,
                     error: Some(format!("Failed to create directory: {}", e)),
                 };
             }
@@ -475,7 +475,7 @@ impl FileProcessor {
                 file_path: analysis_result.file_path,
                 success: true,
                 renamed: false,
-                new_path: None,
+                _new_path: None,
                 error: Some("No rename needed - file already in correct location".to_string()),
             };
         }
@@ -488,7 +488,7 @@ impl FileProcessor {
                     file_path: analysis_result.file_path,
                     success: true,
                     renamed: true,
-                    new_path: Some(target_path),
+                    _new_path: Some(target_path),
                     error: None,
                 }
             }
@@ -497,7 +497,7 @@ impl FileProcessor {
                     file_path: analysis_result.file_path,
                     success: false,
                     renamed: false,
-                    new_path: None,
+                    _new_path: None,
                     error: Some(format!("Failed to {} file: {}", mode, e)),
                 }
             }

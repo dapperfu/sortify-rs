@@ -239,14 +239,14 @@ impl ExifWriter {
 pub struct ExifData {
     pub timestamp: DateTime<Utc>,
     pub milliseconds: u16,
-    pub metadata: HashMap<String, String>,
+    pub _metadata: HashMap<String, String>,
 }
 
 pub struct ExifProcessor {
     /// Optimal EXIF parser for automatic optimization
     optimal_parser: OptimalExifParser,
     /// Essential fields for timestamp extraction only
-    essential_fields: Vec<String>,
+    _essential_fields: Vec<String>,
 }
 
 impl ExifProcessor {
@@ -270,7 +270,7 @@ impl ExifProcessor {
 
         Self {
             optimal_parser: OptimalExifParser::new(),
-            essential_fields,
+            _essential_fields: essential_fields,
         }
     }
 
@@ -337,7 +337,7 @@ impl ExifProcessor {
         Ok(ExifData {
             timestamp,
             milliseconds,
-            metadata,
+            _metadata: metadata,
         })
     }
 
@@ -427,7 +427,7 @@ impl ExifProcessor {
         Ok(ExifData {
             timestamp,
             milliseconds,
-            metadata,
+            _metadata: metadata,
         })
     }
 
@@ -602,7 +602,7 @@ impl ExifProcessor {
     /// Write a timestamp to EXIF data
     /// 
     /// This is a convenience method for updating timestamp-related EXIF tags.
-    pub fn write_timestamp(&self, file_path: &Path, timestamp: DateTime<Utc>) -> Result<()> {
+    pub fn _write_timestamp(&self, file_path: &Path, timestamp: DateTime<Utc>) -> Result<()> {
         debug!("Writing timestamp to file: {}", file_path.display());
         
         let mut tags = HashMap::new();
@@ -721,7 +721,7 @@ impl ExifProcessor {
         Ok((dt, milliseconds))
     }
 
-    fn is_zero_timestamp(&self, timestamp_str: &str) -> bool {
+    fn _is_zero_timestamp(&self, timestamp_str: &str) -> bool {
         timestamp_str.replace(':', "").replace(' ', "").replace('0', "").is_empty()
     }
 
