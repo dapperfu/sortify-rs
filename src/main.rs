@@ -46,6 +46,10 @@ struct Cli {
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
 
+    /// Use machine-readable output format (easier to parse with grep/xargs)
+    #[arg(long)]
+    machine_readable: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -138,10 +142,10 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Files { files, workers, output_dir, mode } => {
-            process_files(files, workers, output_dir, mode)
+            process_files(files, workers, output_dir, mode, cli.machine_readable)
         }
         Commands::Batch { directories, workers, limit, output_dir, mode, no_recursive } => {
-            process_batch(directories, workers, limit, output_dir, mode, !no_recursive)
+            process_batch(directories, workers, limit, output_dir, mode, !no_recursive, cli.machine_readable)
         }
         Commands::Write { files, timestamp, artist, copyright, description, backup } => {
             write_exif_data(files, timestamp, artist, copyright, description, backup)
@@ -167,7 +171,7 @@ fn setup_logging(verbosity: u8) -> Result<()> {
     Ok(())
 }
 
-fn process_files(files: Vec<PathBuf>, workers: Option<usize>, output_dir: PathBuf, mode: String) -> Result<()> {
+fn process_files(files: Vec<PathBuf>, workers: Option<usize>, output_dir: PathBuf, mode: String, machine_readable: bool) -> Result<()> {
     if files.is_empty() {
         anyhow::bail!("No files specified");
     }
@@ -177,7 +181,7 @@ fn process_files(files: Vec<PathBuf>, workers: Option<usize>, output_dir: PathBu
     let mut file_processor = FileProcessor::new(workers);
     let results = file_processor.process_files(files, &output_dir, &mode)?;
 
-    print_summary(&results);
+    print_summary(&results, machine_readable);
     Ok(())
 }
 
@@ -188,6 +192,7 @@ fn process_batch(
     output_dir: PathBuf,
     mode: String,
     recursive: bool,
+    machine_readable: bool,
 ) -> Result<()> {
     if directories.is_empty() {
         anyhow::bail!("No directories specified");
@@ -218,7 +223,7 @@ fn process_batch(
     let mut file_processor = FileProcessor::new(workers);
     let results = file_processor.process_files(all_files, &output_dir, &mode)?;
 
-    print_summary(&results);
+    print_summary(&results, machine_readable);
     Ok(())
 }
 
@@ -251,45 +256,67 @@ fn find_image_files(directory: &Path, recursive: bool) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-fn print_summary(results: &[ProcessResult]) {
+fn print_summary(results: &[ProcessResult], machine_readable: bool) {
     let processed = results.len();
     let renamed = results.iter().filter(|r| r.success && r.renamed).count();
     let skipped = results.iter().filter(|r| r.success && !r.renamed).count();
     let errors = results.iter().filter(|r| !r.success).count();
 
-    println!("\nProcessing complete!");
-    println!("Files processed: {}", processed);
-    println!("Files renamed: {}", renamed);
-    println!("Files skipped: {}", skipped);
-    println!("Errors: {}", errors);
+    if machine_readable {
+        // Machine-readable format: one line per file with status
+        for result in results {
+            let status = if result.success {
+                if result.renamed {
+                    "RENAMED"
+                } else {
+                    "SKIPPED"
+                }
+            } else {
+                "ERROR"
+            };
+            
+            let reason = result.error.as_deref().unwrap_or("Unknown");
+            println!("{}|{}|{}", status, result.file_path.display(), reason);
+        }
+        
+        // Summary line at the end
+        println!("SUMMARY|processed:{}|renamed:{}|skipped:{}|errors:{}", processed, renamed, skipped, errors);
+    } else {
+        // Human-readable format (existing format)
+        println!("\nProcessing complete!");
+        println!("Files processed: {}", processed);
+        println!("Files renamed: {}", renamed);
+        println!("Files skipped: {}", skipped);
+        println!("Errors: {}", errors);
 
-    // Break down skip reasons
-    if skipped > 0 {
-        println!("\nSkip reasons:");
-        let mut skip_reasons = std::collections::HashMap::new();
-        
-        for result in results.iter().filter(|r| r.success && !r.renamed) {
-            let reason = result.error.as_deref().unwrap_or("Unknown reason");
-            let count = skip_reasons.entry(reason).or_insert(0);
-            *count += 1;
+        // Break down skip reasons
+        if skipped > 0 {
+            println!("\nSkip reasons:");
+            let mut skip_reasons = std::collections::HashMap::new();
+            
+            for result in results.iter().filter(|r| r.success && !r.renamed) {
+                let reason = result.error.as_deref().unwrap_or("Unknown reason");
+                let count = skip_reasons.entry(reason).or_insert(0);
+                *count += 1;
+            }
+            
+            for (reason, count) in skip_reasons {
+                println!("  {}: {} files", reason, count);
+            }
+            
+            // Show detailed list of skipped files
+            println!("\nSkipped files:");
+            for result in results.iter().filter(|r| r.success && !r.renamed) {
+                let reason = result.error.as_deref().unwrap_or("Unknown reason");
+                println!("  {}: {}", result.file_path.display(), reason);
+            }
         }
-        
-        for (reason, count) in skip_reasons {
-            println!("  {}: {} files", reason, count);
-        }
-        
-        // Show detailed list of skipped files
-        println!("\nSkipped files:");
-        for result in results.iter().filter(|r| r.success && !r.renamed) {
-            let reason = result.error.as_deref().unwrap_or("Unknown reason");
-            println!("  {}: {}", result.file_path.display(), reason);
-        }
-    }
 
-    if errors > 0 {
-        println!("\nErrors:");
-        for result in results.iter().filter(|r| !r.success) {
-            println!("  {}: {}", result.file_path.display(), result.error.as_deref().unwrap_or("Unknown error"));
+        if errors > 0 {
+            println!("\nErrors:");
+            for result in results.iter().filter(|r| !r.success) {
+                println!("  {}: {}", result.file_path.display(), result.error.as_deref().unwrap_or("Unknown error"));
+            }
         }
     }
 }
