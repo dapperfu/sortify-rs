@@ -69,6 +69,9 @@ enum Commands {
         /// File operation mode: move (default), copy, or symlink
         #[arg(short, long, default_value = "move")]
         mode: String,
+        /// Delete duplicate files that are not sorted (use with caution!)
+        #[arg(long)]
+        delete_duplicates: bool,
     },
     /// Process all image files in one or more directories (recursive by default)
     Batch {
@@ -89,6 +92,9 @@ enum Commands {
         /// Disable recursive directory traversal (only process files in immediate directory)
         #[arg(long)]
         no_recursive: bool,
+        /// Delete duplicate files that are not sorted (use with caution!)
+        #[arg(long)]
+        delete_duplicates: bool,
     },
     /// Write EXIF data to image files
     Write {
@@ -141,11 +147,11 @@ fn main() -> Result<()> {
     info!("Starting sortify-rs");
 
     match cli.command {
-        Commands::Files { files, workers, output_dir, mode } => {
-            process_files(files, workers, output_dir, mode, cli.machine_readable)
+        Commands::Files { files, workers, output_dir, mode, delete_duplicates } => {
+            process_files(files, workers, output_dir, mode, cli.machine_readable, delete_duplicates)
         }
-        Commands::Batch { directories, workers, limit, output_dir, mode, no_recursive } => {
-            process_batch(directories, workers, limit, output_dir, mode, !no_recursive, cli.machine_readable)
+        Commands::Batch { directories, workers, limit, output_dir, mode, no_recursive, delete_duplicates } => {
+            process_batch(directories, workers, limit, output_dir, mode, !no_recursive, cli.machine_readable, delete_duplicates)
         }
         Commands::Write { files, timestamp, artist, copyright, description, backup } => {
             write_exif_data(files, timestamp, artist, copyright, description, backup)
@@ -171,7 +177,7 @@ fn setup_logging(verbosity: u8) -> Result<()> {
     Ok(())
 }
 
-fn process_files(files: Vec<PathBuf>, workers: Option<usize>, output_dir: PathBuf, mode: String, machine_readable: bool) -> Result<()> {
+fn process_files(files: Vec<PathBuf>, workers: Option<usize>, output_dir: PathBuf, mode: String, machine_readable: bool, delete_duplicates: bool) -> Result<()> {
     if files.is_empty() {
         anyhow::bail!("No files specified");
     }
@@ -180,6 +186,11 @@ fn process_files(files: Vec<PathBuf>, workers: Option<usize>, output_dir: PathBu
 
     let mut file_processor = FileProcessor::new(workers);
     let results = file_processor.process_files(files, &output_dir, &mode)?;
+
+    // Handle duplicate deletion if requested
+    if delete_duplicates {
+        delete_duplicate_files(&results, machine_readable)?;
+    }
 
     print_summary(&results, machine_readable);
     Ok(())
@@ -193,6 +204,7 @@ fn process_batch(
     mode: String,
     recursive: bool,
     machine_readable: bool,
+    delete_duplicates: bool,
 ) -> Result<()> {
     if directories.is_empty() {
         anyhow::bail!("No directories specified");
@@ -222,6 +234,11 @@ fn process_batch(
 
     let mut file_processor = FileProcessor::new(workers);
     let results = file_processor.process_files(all_files, &output_dir, &mode)?;
+
+    // Handle duplicate deletion if requested
+    if delete_duplicates {
+        delete_duplicate_files(&results, machine_readable)?;
+    }
 
     print_summary(&results, machine_readable);
     Ok(())
@@ -254,6 +271,72 @@ fn find_image_files(directory: &Path, recursive: bool) -> Result<Vec<PathBuf>> {
     }
 
     Ok(files)
+}
+
+/// Delete duplicate files that were skipped due to content duplication
+fn delete_duplicate_files(results: &[ProcessResult], machine_readable: bool) -> Result<()> {
+    use std::fs;
+    
+    // Find all files that were skipped due to content duplication
+    let duplicate_files: Vec<&ProcessResult> = results
+        .iter()
+        .filter(|r| r.success && !r.renamed)
+        .filter(|r| r.error.as_ref().map_or(false, |e| e.contains("Content duplicate")))
+        .collect();
+    
+    if duplicate_files.is_empty() {
+        if !machine_readable {
+            println!("No duplicate files found to delete.");
+        }
+        return Ok(());
+    }
+    
+    if !machine_readable {
+        println!("\nFound {} duplicate files to delete:", duplicate_files.len());
+        for result in &duplicate_files {
+            println!("  {}", result.file_path.display());
+        }
+        println!("\n⚠️  WARNING: This will permanently delete these files!");
+        println!("Press Enter to continue or Ctrl+C to cancel...");
+        
+        // Read a line to pause for user confirmation
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+    }
+    
+    let mut deleted_count = 0;
+    let mut error_count = 0;
+    
+    for result in duplicate_files {
+        match fs::remove_file(&result.file_path) {
+            Ok(_) => {
+                if !machine_readable {
+                    println!("✅ Deleted: {}", result.file_path.display());
+                } else {
+                    println!("DELETED|{}|Content duplicate removed", result.file_path.display());
+                }
+                deleted_count += 1;
+            }
+            Err(e) => {
+                if !machine_readable {
+                    println!("❌ Failed to delete {}: {}", result.file_path.display(), e);
+                } else {
+                    println!("DELETE_ERROR|{}|{}", result.file_path.display(), e);
+                }
+                error_count += 1;
+            }
+        }
+    }
+    
+    if !machine_readable {
+        println!("\nDuplicate deletion summary:");
+        println!("Files deleted: {}", deleted_count);
+        println!("Errors: {}", error_count);
+    } else {
+        println!("DELETE_SUMMARY|deleted:{}|errors:{}", deleted_count, error_count);
+    }
+    
+    Ok(())
 }
 
 fn print_summary(results: &[ProcessResult], machine_readable: bool) {
