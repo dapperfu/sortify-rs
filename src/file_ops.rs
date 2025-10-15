@@ -363,7 +363,10 @@ impl FileProcessor {
         // Process directory groups in parallel
         let group_results: Vec<Vec<ProcessResult>> = grouped_results
             .into_par_iter()
-            .map(|(_target_dir, results)| {
+            .map(|(_target_dir, mut results)| {
+                // Sort results by file path to ensure consistent duplicate detection
+                results.sort_by(|a, b| a.file_path.cmp(&b.file_path));
+                
                 let mut group_results = Vec::new();
                 let mut existing_files = Vec::new();
                 
@@ -445,8 +448,18 @@ impl FileProcessor {
         if let Some(input_hash) = hash_index.get(&analysis_result.file_path) {
             for (existing_path, existing_hash) in hash_index {
                 if existing_hash == input_hash && existing_path != &analysis_result.file_path {
-                    // Found a content duplicate - check if it's already been processed
-                    if let Some(_existing_target) = self.find_target_path_for_file(existing_path, output_dir, &exif_data) {
+                    // Found a content duplicate - check if the existing file has already been processed
+                    // Since we process files sequentially within each group, we can check if the existing
+                    // file has already been processed by looking at existing_files
+                    let existing_filename = self.filename_generator.generate_filename(
+                        exif_data.timestamp,
+                        exif_data.milliseconds,
+                        &self.get_file_extension(existing_path),
+                        &[], // Don't check existing files for this lookup
+                    );
+                    
+                    if existing_files.contains(&existing_filename) {
+                        // The existing file has already been processed, so this one is a duplicate
                         return ProcessResult {
                             file_path: analysis_result.file_path,
                             success: true,
@@ -553,17 +566,6 @@ impl FileProcessor {
             .unwrap_or_else(|| "".to_string())
     }
 
-    /// Find the target path for a file based on its EXIF data
-    fn find_target_path_for_file(&self, file_path: &Path, output_dir: &Path, exif_data: &crate::exif::ExifData) -> Option<PathBuf> {
-        let extension = self.get_file_extension(file_path);
-        let filename = self.filename_generator.generate_filename(
-            exif_data.timestamp,
-            exif_data.milliseconds,
-            &extension,
-            &[], // Don't check existing files for this lookup
-        );
-        Some(output_dir.join(&filename))
-    }
 }
 
 #[derive(Debug, Clone)]
