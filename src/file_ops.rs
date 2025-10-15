@@ -244,26 +244,37 @@ impl FileProcessor {
         analysis_results: &[AnalysisResult],
         output_dir: &Path,
     ) -> Result<HashMap<PathBuf, String>> {
-        // Only hash files that would actually conflict
+        // Hash all files to detect content duplicates, especially those with identical EXIF timestamps
         let mut files_to_hash = Vec::new();
         let mut target_paths = HashMap::new();
+        let mut timestamp_groups = HashMap::new();
 
+        // Group files by EXIF timestamp to identify potential duplicates
         for result in analysis_results {
             if result.success {
-                if let (Some(_exif_data), Some(new_filename)) = (&result.exif_data, &result.new_filename) {
+                if let (Some(exif_data), Some(new_filename)) = (&result.exif_data, &result.new_filename) {
                     let target_path = output_dir.join(new_filename);
                     target_paths.insert(result.file_path.clone(), target_path.clone());
                     
-                    // Check if target path already exists
+                    // Group by timestamp
+                    let timestamp_key = format!("{}_{}", exif_data.timestamp.timestamp(), exif_data.milliseconds);
+                    timestamp_groups.entry(timestamp_key).or_insert_with(Vec::new).push(result.file_path.clone());
+                    
+                    // Always hash input files
+                    files_to_hash.push(result.file_path.clone());
+                    
+                    // Also hash existing target files
                     if target_path.exists() {
-                        files_to_hash.push(result.file_path.clone());
                         files_to_hash.push(target_path);
                     }
                 }
             }
         }
 
-        if files_to_hash.is_empty() {
+        // If we have files with identical timestamps, we definitely need to hash them
+        let has_duplicate_timestamps = timestamp_groups.values().any(|group| group.len() > 1);
+        
+        if files_to_hash.is_empty() && !has_duplicate_timestamps {
             info!("No file conflicts detected, skipping hash index building");
             return Ok(HashMap::new());
         }
@@ -426,6 +437,25 @@ impl FileProcessor {
             }
         };
 
+        // Check for content duplicates BEFORE generating filename
+        // This prevents tie-breaking from creating different paths for identical content
+        if let Some(input_hash) = hash_index.get(&analysis_result.file_path) {
+            for (existing_path, existing_hash) in hash_index {
+                if existing_hash == input_hash && existing_path != &analysis_result.file_path {
+                    // Found a content duplicate - check if it's already been processed
+                    if let Some(_existing_target) = self.find_target_path_for_file(existing_path, output_dir, &exif_data) {
+                        return ProcessResult {
+                            file_path: analysis_result.file_path,
+                            success: true,
+                            renamed: false,
+                            _new_path: None,
+                            error: Some("Content duplicate - file already exists with same content (safe to delete)".to_string()),
+                        };
+                    }
+                }
+            }
+        }
+
         // Generate final filename with tie-breaking
         let final_filename = self.filename_generator.generate_filename(
             exif_data.timestamp,
@@ -436,7 +466,7 @@ impl FileProcessor {
 
         let target_path = output_dir.join(&final_filename);
 
-        // Check for content duplicates
+        // Check for content duplicates at target location (fallback)
         if target_path.exists() {
             if let (Some(input_hash), Some(existing_hash)) = (
                 hash_index.get(&analysis_result.file_path),
@@ -518,6 +548,18 @@ impl FileProcessor {
                 }
             })
             .unwrap_or_else(|| "".to_string())
+    }
+
+    /// Find the target path for a file based on its EXIF data
+    fn find_target_path_for_file(&self, file_path: &Path, output_dir: &Path, exif_data: &crate::exif::ExifData) -> Option<PathBuf> {
+        let extension = self.get_file_extension(file_path);
+        let filename = self.filename_generator.generate_filename(
+            exif_data.timestamp,
+            exif_data.milliseconds,
+            &extension,
+            &[], // Don't check existing files for this lookup
+        );
+        Some(output_dir.join(&filename))
     }
 }
 
