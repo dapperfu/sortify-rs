@@ -319,20 +319,7 @@ impl ExifProcessor {
             }
         }
 
-        // No valid EXIF timestamp found - try file modification time as fallback
-        debug!("No valid EXIF timestamp found for: {}, trying file modification time", file_path.display());
-        
-        match self.extract_file_modification_time(file_path) {
-            Ok(data) => {
-                debug!("Using file modification time for: {}", file_path.display());
-                return Ok(data);
-            }
-            Err(e) => {
-                debug!("File modification time also failed for {}: {}", file_path.display(), e);
-            }
-        }
-
-        // No valid timestamp found anywhere - ignore the file
+        // No valid EXIF timestamp found - ignore the file
         anyhow::bail!("No valid EXIF timestamp found for: {}", file_path.display())
     }
 
@@ -583,26 +570,6 @@ impl ExifProcessor {
         }
 
         anyhow::bail!("No valid timestamp found in photo EXIF data");
-    }
-
-    /// Extract file modification time as fallback when EXIF data is corrupted or missing
-    fn extract_file_modification_time(&self, file_path: &Path) -> Result<ExifData> {
-        debug!("Extracting file modification time for: {}", file_path.display());
-        
-        let metadata = std::fs::metadata(file_path)
-            .context("Failed to read file metadata")?;
-        
-        let modified_time = metadata.modified()
-            .context("Failed to get file modification time")?;
-        
-        let datetime: DateTime<Utc> = modified_time.into();
-        
-        // Use 0 milliseconds for file modification time
-        Ok(ExifData {
-            timestamp: datetime,
-            milliseconds: 0,
-            _metadata: HashMap::new(),
-        })
     }
 
     /// Write EXIF data to a file
