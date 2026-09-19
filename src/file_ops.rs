@@ -7,14 +7,14 @@ use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, info, warn};
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::exif::{ExifData, ExifProcessor};
 use crate::hashing::ContentHasher;
-use crate::naming::FilenameGenerator;
+use crate::naming::{paths_are_same, FilenameGenerator};
 
 /// Perform file operation based on mode
 fn perform_file_operation(source_path: &Path, target_path: &Path, mode: &str) -> Result<()> {
@@ -210,11 +210,10 @@ impl FileProcessor {
                 debug!("Generated extension: '{}' for file: {}", extension, file_path.display());
                 debug!("EXIF timestamp: {} ({}ms)", exif_data.timestamp, exif_data.milliseconds);
                 
-                let new_filename = self.filename_generator.generate_filename(
+                let new_filename = FilenameGenerator::unsuffixed_relative_path(
                     exif_data.timestamp,
                     exif_data.milliseconds,
                     &extension,
-                    &[], // Will be updated with existing files later
                 );
                 
                 debug!("Generated filename: '{}'", new_filename);
@@ -245,37 +244,36 @@ impl FileProcessor {
         output_dir: &Path,
     ) -> Result<HashMap<PathBuf, String>> {
         let mut files_to_hash = Vec::new();
-        let mut target_paths = HashMap::new();
-        let mut timestamp_groups = HashMap::new();
+        let mut dest_groups: HashMap<String, Vec<PathBuf>> = HashMap::new();
 
-        // Group files by EXIF timestamp to identify potential duplicates
+        // Group by unsuffixed destination path (time + extension), not timestamp alone.
         for result in analysis_results {
             if result.success {
-                if let (Some(exif_data), Some(new_filename)) = (&result.exif_data, &result.new_filename) {
-                    let target_path = output_dir.join(new_filename);
-                    target_paths.insert(result.file_path.clone(), target_path.clone());
-                    
-                    // Group by timestamp
-                    let timestamp_key = format!("{}_{}", exif_data.timestamp.timestamp(), exif_data.milliseconds);
-                    timestamp_groups.entry(timestamp_key).or_insert_with(Vec::new).push(result.file_path.clone());
-                    
-                    // Only hash files that would have collisions
-                    if target_path.exists() {
-                        // Target file already exists - hash both files
-                        files_to_hash.push(result.file_path.clone());
-                        files_to_hash.push(target_path);
-                    }
+                if let Some(new_filename) = &result.new_filename {
+                    dest_groups
+                        .entry(new_filename.clone())
+                        .or_default()
+                        .push(result.file_path.clone());
                 }
             }
         }
 
-        // Only hash files with identical timestamps (potential duplicates)
-        for group in timestamp_groups.values() {
-            if group.len() > 1 {
-                // Multiple files with same timestamp - hash all of them
-                files_to_hash.extend(group.iter().cloned());
+        for (relative_dest, sources) in &dest_groups {
+            let dest = output_dir.join(relative_dest);
+            let dest_exists = dest.exists();
+            let dest_is_only_source = sources.len() == 1 && paths_are_same(&dest, &sources[0]);
+            let time_collision = sources.len() > 1 || (dest_exists && !dest_is_only_source);
+            if !time_collision {
+                continue;
+            }
+            files_to_hash.extend(sources.iter().cloned());
+            if dest_exists {
+                files_to_hash.push(dest);
             }
         }
+
+        files_to_hash.sort();
+        files_to_hash.dedup();
 
         if files_to_hash.is_empty() {
             info!("No file conflicts detected, skipping hash index building");
@@ -369,6 +367,7 @@ impl FileProcessor {
                 
                 let mut group_results = Vec::new();
                 let mut existing_files = Vec::new();
+                let mut placed_hashes = HashSet::new();
                 
                 // Within each group, process files sequentially to avoid conflicts
                 for result in results {
@@ -377,6 +376,7 @@ impl FileProcessor {
                         &hash_index,
                         &output_dir,
                         &mut existing_files,
+                        &mut placed_hashes,
                         mode,
                     );
                     group_results.push(process_result);
@@ -417,6 +417,7 @@ impl FileProcessor {
         hash_index: &HashMap<PathBuf, String>,
         output_dir: &Path,
         existing_files: &mut Vec<String>,
+        placed_hashes: &mut HashSet<String>,
         mode: &str,
     ) -> ProcessResult {
         if !analysis_result.success {
@@ -429,7 +430,7 @@ impl FileProcessor {
             };
         }
 
-        let (exif_data, _new_filename) = match (analysis_result.exif_data, analysis_result.new_filename) {
+        let (exif_data, unsuffixed_filename) = match (analysis_result.exif_data, analysis_result.new_filename) {
             (Some(exif_data), Some(filename)) => (exif_data, filename),
             _ => {
                 // Files without EXIF data (like symlinks) should be skipped, not treated as errors
@@ -443,52 +444,24 @@ impl FileProcessor {
             }
         };
 
-        // Check for content duplicates BEFORE generating filename
-        // This prevents tie-breaking from creating different paths for identical content
-        if let Some(input_hash) = hash_index.get(&analysis_result.file_path) {
-            for (existing_path, existing_hash) in hash_index {
-                if existing_hash == input_hash && existing_path != &analysis_result.file_path {
-                    // Found a content duplicate - check if the existing file has already been processed
-                    // Since we process files sequentially within each group, we can check if the existing
-                    // file has already been processed by looking at existing_files
-                    let existing_filename = self.filename_generator.generate_filename(
-                        exif_data.timestamp,
-                        exif_data.milliseconds,
-                        &self.get_file_extension(existing_path),
-                        &[], // Don't check existing files for this lookup
-                    );
-                    
-                    if existing_files.contains(&existing_filename) {
-                        // The existing file has already been processed, so this one is a duplicate
-                        return ProcessResult {
-                            file_path: analysis_result.file_path,
-                            success: true,
-                            renamed: false,
-                            _new_path: None,
-                            error: Some("Content duplicate - file already exists with same content (safe to delete)".to_string()),
-                        };
-                    }
-                }
+        let unsuffixed_dest = output_dir.join(&unsuffixed_filename);
+        let input_hash = hash_index.get(&analysis_result.file_path);
+
+        // Same content already placed this batch, or already at the unsuffixed dest.
+        if let Some(input_hash) = input_hash {
+            if placed_hashes.contains(input_hash) {
+                return ProcessResult {
+                    file_path: analysis_result.file_path,
+                    success: true,
+                    renamed: false,
+                    _new_path: None,
+                    error: Some("Content duplicate - file already exists with same content (safe to delete)".to_string()),
+                };
             }
-        }
-
-        // Generate final filename with tie-breaking
-        let final_filename = self.filename_generator.generate_filename(
-            exif_data.timestamp,
-            exif_data.milliseconds,
-            &self.get_file_extension(&analysis_result.file_path),
-            existing_files,
-        );
-
-        let target_path = output_dir.join(&final_filename);
-
-        // Check for content duplicates at target location (fallback)
-        if target_path.exists() {
-            if let (Some(input_hash), Some(existing_hash)) = (
-                hash_index.get(&analysis_result.file_path),
-                hash_index.get(&target_path),
-            ) {
-                if input_hash == existing_hash {
+            if unsuffixed_dest.exists()
+                && !paths_are_same(&unsuffixed_dest, &analysis_result.file_path)
+            {
+                if hash_index.get(&unsuffixed_dest) == Some(input_hash) {
                     return ProcessResult {
                         file_path: analysis_result.file_path,
                         success: true,
@@ -497,10 +470,19 @@ impl FileProcessor {
                         error: Some("Content duplicate - file already exists with same content (safe to delete)".to_string()),
                     };
                 }
-                // If hashes are different, continue with renaming (will add suffix)
             }
-            // If no hash info available, continue with renaming (will add suffix)
         }
+
+        let final_filename = self.filename_generator.generate_filename(
+            exif_data.timestamp,
+            exif_data.milliseconds,
+            &self.get_file_extension(&analysis_result.file_path),
+            existing_files,
+            Some(output_dir),
+            Some(&analysis_result.file_path),
+        );
+
+        let target_path = output_dir.join(&final_filename);
 
         // Create directory structure
         if let Some(parent) = target_path.parent() {
@@ -517,6 +499,10 @@ impl FileProcessor {
 
         // Check if file would be renamed to itself
         if target_path == analysis_result.file_path {
+            if let Some(hash) = input_hash {
+                placed_hashes.insert(hash.clone());
+            }
+            existing_files.push(final_filename);
             return ProcessResult {
                 file_path: analysis_result.file_path,
                 success: true,
@@ -530,6 +516,9 @@ impl FileProcessor {
         match perform_file_operation(&analysis_result.file_path, &target_path, mode) {
             Ok(_) => {
                 existing_files.push(final_filename);
+                if let Some(hash) = input_hash {
+                    placed_hashes.insert(hash.clone());
+                }
                 ProcessResult {
                     file_path: analysis_result.file_path,
                     success: true,

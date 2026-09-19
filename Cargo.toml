@@ -1,6 +1,6 @@
 [package]
 name = "sortify-rs"
-version = "0.1.7"
+version = "0.2.0"
 edition = "2021"
 authors = ["Sortify Team <sortify@example.com>"]
 description = "Image and video file organizer based on EXIF timestamps"
@@ -23,7 +23,7 @@ harness = false
 clap = { version = "4.4", features = ["derive"] }
 
 # EXIF processing with fast-exif-rs (ultra-fast pure Rust implementation with SIMD acceleration)
-fast-exif-reader = { git = "https://github.com/dapperfu/fast-exif-rs", branch = "main", features = ["simd"] }
+fast-exif-reader = { git = "https://github.com/dapperfu/fast-exif-rs", tag = "v0.10.5", features = ["simd"] }
 
 # File operations and directory traversal
 walkdir = "2.4"

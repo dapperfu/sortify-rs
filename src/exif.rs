@@ -1,16 +1,14 @@
 /**
  * EXIF processing module with fast-exif-rs implementation
  * 
- * Processing order (fastest to slowest):
- * 1. Optimal EXIF parser (automatic optimization with ultra-seek, memory mapping, SIMD)
- * 2. fast-exif-rs (ultra-fast pure Rust, works for all formats)
+ * Processing order:
+ * 1. fast-exif-rs datetime read (v0.10.5 composites: SubSec*, CreateDate aliases)
+ * 2. fast-exif-rs full read (remaining video/maker-note dates)
  */
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, NaiveDateTime, Utc, Datelike};
-use fast_exif_reader::{
-    FastExifReader, OptimalExifParser
-};
+use chrono::{DateTime, NaiveDateTime, Utc};
+use fast_exif_reader::{FastExifReader, ReadOptions};
 use log::debug;
 use std::collections::HashMap;
 use std::path::Path;
@@ -243,8 +241,8 @@ pub struct ExifData {
 }
 
 pub struct ExifProcessor {
-    /// Optimal EXIF parser for automatic optimization
-    optimal_parser: OptimalExifParser,
+    /// Reused reader; v0.10.5 materializes extra date aliases and SubSec composites.
+    reader: FastExifReader,
     /// Essential fields for timestamp extraction only
     _essential_fields: Vec<String>,
 }
@@ -266,10 +264,14 @@ impl ExifProcessor {
             "SubSecCreateDate".to_string(),
             "SubSecModifyDate".to_string(),
             "SubSecDateTimeOriginal".to_string(),
+            "OffsetTime".to_string(),
+            "OffsetTimeOriginal".to_string(),
+            "OffsetTimeDigitized".to_string(),
+            "DateTimeCreated".to_string(),
         ];
 
         Self {
-            optimal_parser: OptimalExifParser::new(),
+            reader: FastExifReader::new(),
             _essential_fields: essential_fields,
         }
     }
@@ -297,18 +299,18 @@ impl ExifProcessor {
 
         let _is_jpeg = matches!(file_ext.as_str(), "jpg" | "jpeg");
 
-        // Method 1: Optimal EXIF parser (automatic optimization based on file size and format)
+        // Method 1: Date-focused parse (composite SubSec* / CreateDate from v0.10.5)
         match self.extract_exif_data_optimal(file_path) {
             Ok(data) => {
-                debug!("optimal parser succeeded for: {}", file_path.display());
+                debug!("datetime parser succeeded for: {}", file_path.display());
                 return Ok(data);
             }
             Err(e) => {
-                debug!("optimal parser failed for {}: {}", file_path.display(), e);
+                debug!("datetime parser failed for {}: {}", file_path.display(), e);
             }
         }
 
-        // Method 2: Try fast-exif-rs (ultra-fast pure Rust, works for all formats)
+        // Method 2: Full tag set for formats that only expose video/maker-note dates
         match self.extract_exif_data_fast_exif(file_path) {
             Ok(data) => {
                 debug!("fast-exif-rs succeeded for: {}", file_path.display());
@@ -323,15 +325,45 @@ impl ExifProcessor {
         anyhow::bail!("No valid EXIF timestamp found for: {}", file_path.display())
     }
 
-    /// Extract EXIF data using optimal EXIF parser (automatic optimization)
-    pub fn extract_exif_data_optimal(&mut self, file_path: &Path) -> Result<ExifData> {
-        debug!("Using optimal EXIF parser for: {}", file_path.display());
-        
-        let file_path_str = file_path.to_string_lossy().to_string();
-        let metadata = self.optimal_parser.parse_file(&file_path_str)
-            .map_err(|e| anyhow::anyhow!("optimal parser failed: {}", e))?;
+    /// Date-focused read: v0.10.5 fills CreateDate aliases and SubSec* composites.
+    fn datetime_read_options() -> ReadOptions {
+        let mut opts = ReadOptions::tags([
+            "DateTimeOriginal",
+            "CreateDate",
+            "DateTime",
+            "ModifyDate",
+            "DateTimeDigitized",
+            "DateTimeCreated",
+            "CreationDate",
+            "SubSecTime",
+            "SubSecTimeOriginal",
+            "SubSecTimeDigitized",
+            "OffsetTime",
+            "OffsetTimeOriginal",
+            "OffsetTimeDigitized",
+            "SubSecCreateDate",
+            "SubSecDateTimeOriginal",
+            "SubSecModifyDate",
+            "MediaCreateDate",
+            "TrackCreateDate",
+            "MediaModifyDate",
+            "TrackModifyDate",
+            "NikonDateTime",
+        ]);
+        opts.include_computed_fields = true;
+        opts
+    }
 
-        // Extract best timestamp
+    /// Extract EXIF data using the datetime-optimized fast-exif-rs path
+    pub fn extract_exif_data_optimal(&mut self, file_path: &Path) -> Result<ExifData> {
+        debug!("Using fast-exif-rs datetime options for: {}", file_path.display());
+
+        let file_path_str = file_path.to_string_lossy().to_string();
+        let metadata = self
+            .reader
+            .read_file_with_options(&file_path_str, &Self::datetime_read_options())
+            .map_err(|e| anyhow::anyhow!("datetime parser failed: {}", e))?;
+
         let (timestamp, milliseconds) = self.extract_best_timestamp(&metadata)?;
 
         Ok(ExifData {
@@ -362,12 +394,10 @@ impl ExifProcessor {
                 debug!("Generated extension: '{}' for file: {}", extension, file_path.display());
                 debug!("EXIF timestamp: {} ({}ms)", exif_data.timestamp, exif_data.milliseconds);
                 
-                let filename_generator = crate::naming::FilenameGenerator::new();
-                let new_filename = filename_generator.generate_filename(
+                let new_filename = crate::naming::FilenameGenerator::unsuffixed_relative_path(
                     exif_data.timestamp,
                     exif_data.milliseconds,
                     &extension,
-                    &[], // Will be updated with existing files later
                 );
                 
                 debug!("Generated filename: '{}'", new_filename);
@@ -431,145 +461,52 @@ impl ExifProcessor {
         })
     }
 
-    /// Extract the best available timestamp from EXIF data using comprehensive fallback hierarchy
-    /// 
-    /// Priority order for photos:
-    /// 1. SubSecCreateDate (with subseconds)
-    /// 2. SubSecDateTimeOriginal (with subseconds) 
-    /// 3. SubSecModifyDate (with subseconds)
-    /// 4. DateTimeOriginal + SubSecTimeOriginal (combined)
-    /// 5. ModifyDate + SubSecTime (combined)
-    /// 6. DateTimeDigitized + SubSecTimeDigitized (combined)
-    /// 7. DateTimeOriginal (fallback)
-    /// 8. ModifyDate (fallback)
-    /// 9. DateTimeDigitized (fallback)
-    /// 10. CreateDate (LAST RESORT)
-    /// 
-    /// Priority order for videos:
-    /// 1. DateTimeOriginal
-    /// 2. NikonDateTime
-    /// 3. MediaCreateDate
-    /// 4. MediaModifyDate
-    /// 5. ModifyDate
-    /// 6. CreateDate (LAST RESORT)
+    /// Pick a capture timestamp from EXIF tags.
+    ///
+    /// Order: SubSecDateTimeOriginal, SubSecModifyDate, DateTimeOriginal,
+    /// DateTimeDigitized, DateTime, then every other parseable date tag
+    /// alphabetically. Filesystem File* dates are ignored.
     fn extract_best_timestamp(&self, metadata: &HashMap<String, String>) -> Result<(DateTime<Utc>, u16)> {
-        // Check if this is a video file
-        let is_video = metadata.contains_key("MediaCreateDate") || metadata.contains_key("MediaModifyDate");
-
-        if is_video {
-            self.extract_video_timestamp(metadata)
-        } else {
-            self.extract_photo_timestamp(metadata)
-        }
-    }
-
-    fn extract_video_timestamp(&self, metadata: &HashMap<String, String>) -> Result<(DateTime<Utc>, u16)> {
-        debug!("Extracting video timestamp from {} metadata fields", metadata.len());
-        
-        // Priority order for video timestamps (avoiding unreliable file system dates)
-        let timestamp_fields = [
+        const PRIORITY: &[&str] = &[
+            "SubSecDateTimeOriginal",
+            "SubSecModifyDate",
             "DateTimeOriginal",
-            "CreationDate",
-            "MediaCreateDate", 
-            "TrackCreateDate",
-            "Create Date",
-            "MakerNotes:CreateDate",
-            "MediaModifyDate",
-            "TrackModifyDate",
-            "Modify Date",
-            "MakerNotes:ModifyDate",
-            "NikonDateTime",
-            "ModifyDate",
+            "DateTimeDigitized",
+            "DateTime",
         ];
 
-        for field in timestamp_fields {
-            if let Some(timestamp_str) = metadata.get(field) {
-                debug!("Found field {}: '{}'", field, timestamp_str);
-                
-                // Skip file system dates that are unreliable
-                if field.contains("File") && self.is_recent_timestamp(timestamp_str) {
-                    debug!("Skipping file system date: {}", field);
-                    continue;
-                }
-                
+        for field in PRIORITY {
+            if let Some(timestamp_str) = metadata.get(*field) {
                 match self.parse_timestamp_with_subseconds(timestamp_str) {
                     Ok((dt, ms)) => {
-                        debug!("Successfully parsed {}: {} ({}ms)", field, dt, ms);
+                        debug!("Using {}: {} ({}ms)", field, dt, ms);
                         return Ok((dt, ms));
                     }
-                    Err(e) => {
-                        debug!("Failed to parse {}: {}", field, e);
+                    Err(e) => debug!("Failed to parse {}: {}", field, e),
+                }
+            }
+        }
+
+        let mut rest: Vec<&String> = metadata
+            .keys()
+            .filter(|k| !PRIORITY.iter().any(|p| p == k))
+            .filter(|k| !k.split(':').last().unwrap_or(k).starts_with("File"))
+            .collect();
+        rest.sort();
+
+        for field in rest {
+            if let Some(timestamp_str) = metadata.get(field) {
+                match self.parse_timestamp_with_subseconds(timestamp_str) {
+                    Ok((dt, ms)) => {
+                        debug!("Using {}: {} ({}ms)", field, dt, ms);
+                        return Ok((dt, ms));
                     }
-                }
-            } else {
-                debug!("Field {} not found in metadata", field);
-            }
-        }
-
-        debug!("No valid timestamp found in video EXIF data");
-        anyhow::bail!("No valid timestamp found in video EXIF data");
-    }
-
-    fn extract_photo_timestamp(&self, metadata: &HashMap<String, String>) -> Result<(DateTime<Utc>, u16)> {
-        // 1. Pre-combined subsecond timestamps (highest priority)
-        let pre_combined_fields = [
-            "SubSecCreateDate",
-            "SubSecDateTimeOriginal", 
-            "SubSecModifyDate"
-        ];
-
-        for field in pre_combined_fields {
-            if let Some(timestamp_str) = metadata.get(field) {
-                if let Ok((dt, ms)) = self.parse_timestamp_with_subseconds(timestamp_str) {
-                    return Ok((dt, ms));
+                    Err(_) => {}
                 }
             }
         }
 
-        // 2. Combine base timestamps with subsecond data
-        let combinations = [
-            ("DateTimeOriginal", "SubSecTimeOriginal"),
-            ("ModifyDate", "SubSecTime"),
-            ("DateTimeDigitized", "SubSecTimeDigitized")
-        ];
-
-        for (base_field, subsec_field) in combinations {
-            if let (Some(base_time), Some(subsec_value)) = (metadata.get(base_field), metadata.get(subsec_field)) {
-                let padded_subsec = format!("{:0<3}", subsec_value);
-                let combined_timestamp = format!("{}.{}", base_time, padded_subsec);
-                
-                if let Ok((dt, ms)) = self.parse_timestamp_with_subseconds(&combined_timestamp) {
-                    return Ok((dt, ms));
-                }
-            }
-        }
-
-        // 3. Fallback to base timestamps only (avoiding file system dates)
-        let fallback_fields = [
-            "DateTimeOriginal",
-            "CreationDate",
-            "Create Date",
-            "MakerNotes:CreateDate",
-            "ModifyDate",
-            "Modify Date", 
-            "MakerNotes:ModifyDate",
-            "DateTimeDigitized"
-        ];
-
-        for field in fallback_fields {
-            if let Some(timestamp_str) = metadata.get(field) {
-                // Skip file system dates that are unreliable
-                if field.contains("File") && self.is_recent_timestamp(timestamp_str) {
-                    continue;
-                }
-                
-                if let Ok((dt, ms)) = self.parse_timestamp_with_subseconds(timestamp_str) {
-                    return Ok((dt, ms));
-                }
-            }
-        }
-
-        anyhow::bail!("No valid timestamp found in photo EXIF data");
+        anyhow::bail!("No valid timestamp found in EXIF data");
     }
 
     /// Write EXIF data to a file
@@ -723,15 +660,5 @@ impl ExifProcessor {
 
     fn _is_zero_timestamp(&self, timestamp_str: &str) -> bool {
         timestamp_str.replace(':', "").replace(' ', "").replace('0', "").is_empty()
-    }
-
-    /// Check if a timestamp is suspiciously recent (likely a file system date)
-    fn is_recent_timestamp(&self, timestamp_str: &str) -> bool {
-        if let Ok((dt, _)) = self.parse_timestamp_with_subseconds(timestamp_str) {
-            // If timestamp is after 2024, it's likely a file system date
-            dt.year() > 2024
-        } else {
-            false
-        }
     }
 }
