@@ -2,7 +2,7 @@
  * EXIF processing module with fast-exif-rs implementation
  * 
  * Processing order:
- * 1. fast-exif-rs datetime read (v0.10.5 composites: SubSec*, CreateDate aliases)
+ * 1. fast-exif-rs datetime read (v0.11.1 composites: SubSec*, CreateDate aliases)
  * 2. fast-exif-rs full read (remaining video/maker-note dates)
  */
 
@@ -241,7 +241,7 @@ pub struct ExifData {
 }
 
 pub struct ExifProcessor {
-    /// Reused reader; v0.10.5 materializes extra date aliases and SubSec composites.
+    /// Reused reader; v0.11.1 materializes extra date aliases and SubSec composites.
     reader: FastExifReader,
     /// Essential fields for timestamp extraction only
     _essential_fields: Vec<String>,
@@ -299,7 +299,7 @@ impl ExifProcessor {
 
         let _is_jpeg = matches!(file_ext.as_str(), "jpg" | "jpeg");
 
-        // Method 1: Date-focused parse (composite SubSec* / CreateDate from v0.10.5)
+        // Method 1: Date-focused parse (composite SubSec* / CreateDate from v0.11.1)
         match self.extract_exif_data_optimal(file_path) {
             Ok(data) => {
                 debug!("datetime parser succeeded for: {}", file_path.display());
@@ -325,7 +325,7 @@ impl ExifProcessor {
         anyhow::bail!("No valid EXIF timestamp found for: {}", file_path.display())
     }
 
-    /// Date-focused read: v0.10.5 fills CreateDate aliases and SubSec* composites.
+    /// Date-focused read: v0.11.1 fills CreateDate aliases and SubSec* composites.
     fn datetime_read_options() -> ReadOptions {
         let mut opts = ReadOptions::tags([
             "DateTimeOriginal",

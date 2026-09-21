@@ -344,8 +344,8 @@ dependencies = [
 
 [[package]]
 name = "fast-exif-reader"
-version = "0.10.5"
-source = "git+https://github.com/dapperfu/fast-exif-rs?tag=v0.10.5#1b6ec5b92b00b42c3cdc22c77bab0c1fcf24db15"
+version = "0.11.1"
+source = "git+https://github.com/dapperfu/fast-exif-rs?tag=v0.11.1#4c17bdf03bb6db190a2d2f5fdb7e3e81ecca15b8"
 dependencies = [
  "anyhow",
  "byteorder",
@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "sortify-rs"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "chrono",
