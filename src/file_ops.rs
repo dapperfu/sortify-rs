@@ -328,7 +328,13 @@ impl FileProcessor {
                 .unwrap()
                 .progress_chars("#>-"),
         );
-        pb.set_message("Renaming files");
+        let action = match mode {
+            "copy" => "Copying",
+            "symlink" => "Symlinking",
+            _ => "Moving",
+        };
+        pb.set_message(format!("{} files", action));
+        pb.enable_steady_tick(std::time::Duration::from_millis(100));
 
         // Group files by target directory to minimize conflicts
         let mut grouped_results = HashMap::new();
@@ -351,25 +357,20 @@ impl FileProcessor {
             grouped_results.insert(output_dir.to_path_buf(), files_without_exif);
         }
 
-        // Process each directory group in parallel
         let pb = Arc::new(pb);
         let hash_index = Arc::new(hash_index);
         let output_dir = Arc::new(output_dir.to_path_buf());
-        
-        let mut all_results = Vec::new();
-        
-        // Process directory groups in parallel
+
+        // Directory groups run in parallel; files within a group stay sequential.
         let group_results: Vec<Vec<ProcessResult>> = grouped_results
             .into_par_iter()
             .map(|(_target_dir, mut results)| {
-                // Sort results by file path to ensure consistent duplicate detection
                 results.sort_by(|a, b| a.file_path.cmp(&b.file_path));
                 
                 let mut group_results = Vec::new();
                 let mut existing_files = Vec::new();
                 let mut placed_hashes = HashSet::new();
                 
-                // Within each group, process files sequentially to avoid conflicts
                 for result in results {
                     let process_result = self.process_single_file_rename(
                         result,
@@ -379,35 +380,15 @@ impl FileProcessor {
                         &mut placed_hashes,
                         mode,
                     );
+                    pb.inc(1);
                     group_results.push(process_result);
                 }
                 group_results
             })
             .collect();
 
-        // Flatten results and update progress
-        for group_result in group_results {
-            for process_result in group_result {
-                match &process_result {
-                    ProcessResult { renamed: true, .. } => {
-                        let msg = format!("Renamed: {}", process_result.file_path.display());
-                        pb.set_message(msg);
-                    }
-                    ProcessResult { success: false, .. } => {
-                        let msg = format!("Error: {}", process_result.file_path.display());
-                        pb.set_message(msg);
-                    }
-                    _ => {
-                        let msg = format!("Skipped: {}", process_result.file_path.display());
-                        pb.set_message(msg);
-                    }
-                }
-                all_results.push(process_result);
-                pb.inc(1);
-            }
-        }
-
-        pb.finish_with_message("Renaming complete");
+        let all_results = group_results.into_iter().flatten().collect();
+        pb.finish_with_message(format!("{} complete", action));
         Ok(all_results)
     }
 
